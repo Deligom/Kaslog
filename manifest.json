@@ -1,0 +1,24 @@
+{
+  "name": "KASLOG",
+  "short_name": "KASLOG",
+  "description": "Kişisel fitness takip uygulaması",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#0a0a0c",
+  "theme_color": "#0a0a0c",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "https://placehold.co/192x192/f05a22/ffffff?text=K",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://placehold.co/512x512/f05a22/ffffff?text=K",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
