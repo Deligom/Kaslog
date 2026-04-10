@@ -187,7 +187,7 @@ input{border:none;outline:none;background:none;color:inherit;width:100%;}
 .wo-input-num::-webkit-inner-spin-button,.wo-input-num::-webkit-outer-spin-button{-webkit-appearance:none;}
 .wo-input-unit{font-size:11px;color:var(--text3);margin-top:1px;}
 .wo-input-adj{display:flex;justify-content:center;gap:10px;margin-top:6px;}
-.wo-adj-btn{width:36px;height:36px;border-radius:50%;background:var(--surface3);font-size:20px;font-weight:700;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:var(--transition);color:var(--text2);border:1.5px solid var(--border);}
+.wo-adj-btn{width:36px;height:36px;border-radius:50%;background:var(--surface3);font-size:20px;font-weight:700;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:var(--transition);color:var(--text2);border:1.5px solid var(--border);user-select:none;-webkit-user-select:none;touch-action:manipulation;}
 .wo-adj-btn:active{transform:scale(0.84);background:var(--accent);color:#fff;border-color:var(--accent);}
 
 /* Collapsible tip */
@@ -213,6 +213,17 @@ input{border:none;outline:none;background:none;color:inherit;width:100%;}
 .set-dot.warmup{background:rgba(245,158,11,0.55);}
 /* Set note */
 .wo-note-input{width:100%;background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;padding:9px 12px;font-size:13px;color:var(--text);resize:none;font-family:inherit;transition:var(--transition);margin-bottom:16px;}
+/* Plate Calculator */
+.plate-calc-btn{position:absolute;top:8px;right:8px;width:26px;height:26px;border-radius:8px;background:var(--surface3);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:13px;cursor:pointer;transition:var(--transition);}
+.plate-calc-btn:active{transform:scale(0.88);background:var(--accent-dim);}
+.plate-bar-sleeve{height:10px;background:var(--text3);border-radius:3px;flex-shrink:0;}
+.plate-bar-center{height:10px;background:linear-gradient(90deg,var(--text3),var(--text2));border-radius:4px;flex-shrink:0;}
+.plate-row-wrap{display:flex;align-items:center;justify-content:center;gap:3px;padding:18px 8px;min-height:90px;overflow-x:auto;}
+.plate-row-wrap::-webkit-scrollbar{display:none;}
+.plate-item-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);}
+.plate-item-row:last-child{border-bottom:none;}
+.plate-swatch{width:16px;height:16px;border-radius:4px;flex-shrink:0;}
+.wo-adj-btn.lp-active{background:var(--accent)!important;color:#fff!important;border-color:var(--accent)!important;}
 .wo-note-input:focus{border-color:var(--accent);outline:none;background:var(--surface);}
 .wo-note-input::placeholder{color:var(--text3);}
 /* Exercise progress modal */
@@ -540,13 +551,18 @@ canvas{width:100%;height:100%;}
 .nut-bar-protein{background:#3b82f6;}
 .nut-bar-carbs{background:var(--warning);}
 .nut-add-wrap{margin:0 20px 16px;position:relative;}
-.nut-add-input{width:100%;background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:13px 52px 13px 16px;font-size:15px;color:var(--text);transition:var(--transition);}
+.nut-add-input{width:100%;background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:13px 94px 13px 16px;font-size:15px;color:var(--text);transition:var(--transition);}
 .nut-add-input:focus{border-color:var(--accent);outline:none;background:var(--surface);}
 .nut-add-input::placeholder{color:var(--text3);}
 .nut-add-btn{position:absolute;right:8px;top:50%;transform:translateY(-50%);width:36px;height:36px;border-radius:10px;background:var(--accent);display:flex;align-items:center;justify-content:center;transition:var(--transition);}
 .nut-add-btn:active{transform:translateY(-50%) scale(0.9);}
 .nut-add-btn svg{width:18px;height:18px;stroke:#fff;fill:none;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;}
 .nut-add-btn.loading{background:var(--surface3);}
+.nut-cam-btn{position:absolute;right:50px;top:50%;transform:translateY(-50%);width:36px;height:36px;border-radius:10px;background:var(--surface2);border:1.5px solid var(--border);display:flex;align-items:center;justify-content:center;transition:var(--transition);}
+.nut-cam-btn:active{transform:translateY(-50%) scale(0.9);background:var(--accent-dim);}
+.nut-cam-btn svg{width:18px;height:18px;stroke:var(--text2);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;}
+.nut-cam-btn.loading{background:var(--surface3);pointer-events:none;}
+.nut-cam-btn.loading svg{stroke:var(--text3);}
 .nut-entry-list{margin:0 20px;}
 .nut-entry{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 14px;margin-bottom:8px;display:flex;align-items:center;gap:10px;}
 .nut-entry-icon{font-size:22px;flex-shrink:0;}
@@ -698,14 +714,17 @@ canvas{width:100%;height:100%;}
           <span id="wo-overload-badge" style="display:none;margin-left:auto;font-size:11px;font-weight:700;color:var(--accent);white-space:nowrap"></span>
         </div>
         <div class="wo-inputs">
-          <div class="wo-input-block">
+          <div class="wo-input-block" style="position:relative">
             <div class="wo-input-label" id="wo-weight-label">kg</div>
-            <input class="wo-input-num" type="number" id="wo-weight" value="0" min="0" step="2.5">
+            <input class="wo-input-num" type="number" id="wo-weight" value="0" min="0" step="0.5">
             <div class="wo-input-unit">kg</div>
             <div class="wo-input-adj">
-              <div class="wo-adj-btn" onclick="adjInput('wo-weight',-2.5)">−</div>
-              <div class="wo-adj-btn" onclick="adjInput('wo-weight',2.5)">+</div>
+              <div class="wo-adj-btn" id="wo-w-minus"
+                onpointerdown="startWAdj(this,-0.5,-2.5)" onpointerup="endWAdj()" onpointerleave="endWAdj()" onpointercancel="endWAdj()" oncontextmenu="return false">−</div>
+              <div class="wo-adj-btn" id="wo-w-plus"
+                onpointerdown="startWAdj(this,0.5,2.5)" onpointerup="endWAdj()" onpointerleave="endWAdj()" onpointercancel="endWAdj()" oncontextmenu="return false">+</div>
             </div>
+            <div class="plate-calc-btn" onclick="openPlateCalc()" title="Plaka Hesap">⚖</div>
           </div>
           <div class="wo-input-block" id="wo-reps-block">
             <div class="wo-input-label" id="wo-reps-label">rep</div>
@@ -877,6 +896,8 @@ canvas{width:100%;height:100%;}
 
 <div id="toast-el"></div>
 <div id="pr-banner"><div class="pr-banner-inner" id="pr-banner-inner">🏆 YENİ REKOR!</div></div>
+<!-- Hidden file input for nutrition photo -->
+<input type="file" id="nut-photo-input" accept="image/*" multiple style="display:none" onchange="handleNutPhotos(this)">
 
 <!-- Exercise Progress Modal -->
 <div class="modal-backdrop" id="modal-ex-progress">
@@ -896,6 +917,37 @@ canvas{width:100%;height:100%;}
       </div>
       <div id="exp-history" style="padding:0 16px 16px"></div>
     </div>
+  </div>
+</div>
+
+<!-- Plate Calculator Modal -->
+<div class="modal-backdrop center-dialog" id="modal-plates">
+  <div class="dialog-box" style="max-width:340px;width:93%;padding:20px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:800">⚖ Plaka Hesap</div>
+      <button class="modal-close" onclick="closeModal('modal-plates')" style="font-size:18px;color:var(--text2);background:none;border:none;cursor:pointer;padding:4px 8px">✕</button>
+    </div>
+    <!-- Mode toggle -->
+    <div style="display:flex;gap:8px;margin-bottom:16px">
+      <div class="pill active" id="pmode-barbell" onclick="setPlateMode('barbell')" style="flex:1;text-align:center">🏋️ Barbell</div>
+      <div class="pill" id="pmode-dumbbell" onclick="setPlateMode('dumbbell')" style="flex:1;text-align:center">🥊 Dumbbell</div>
+    </div>
+    <!-- Weight control -->
+    <div style="text-align:center;margin-bottom:4px">
+      <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--text2);text-transform:uppercase;margin-bottom:8px" id="plate-mode-hint">Bar (20kg) dahil</div>
+      <div style="display:flex;align-items:center;justify-content:center;gap:16px">
+        <div class="wo-adj-btn" onclick="adjPlateWeight(-0.5)" style="width:40px;height:40px;font-size:22px">−</div>
+        <div style="font-family:'Barlow Condensed',sans-serif;font-size:52px;font-weight:800;min-width:80px;text-align:center;line-height:1" id="plate-weight-disp">20</div>
+        <div class="wo-adj-btn" onclick="adjPlateWeight(0.5)" style="width:40px;height:40px;font-size:22px">+</div>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-top:4px">kg</div>
+    </div>
+    <!-- Barbell visual -->
+    <div class="plate-row-wrap" id="plate-visual"></div>
+    <!-- Plate list -->
+    <div id="plate-list"></div>
+    <!-- Error -->
+    <div id="plate-error" style="display:none;text-align:center;color:var(--danger);font-size:13px;padding:8px 0"></div>
   </div>
 </div>
 
@@ -2122,6 +2174,109 @@ function showSummary(){
   },300);
 }
 
+// ============================================================
+// PLATE CALCULATOR
+// ============================================================
+const PLATE_COLORS={25:'#ef4444',20:'#3b82f6',15:'#eab308',10:'#22c55e',5:'#d1d5db',2.5:'#f97316',2:'#8b5cf6',1.25:'#9ca3af',1:'#6b7280',0.5:'#4b5563'};
+const PLATE_SIZES=[25,20,15,10,5,2.5,2,1.25,1,0.5];
+const BAR_KG=20;
+let _plateW=20,_plateMode='barbell';
+
+function openPlateCalc(){
+  const cur=parseFloat(document.getElementById('wo-weight')?.value)||0;
+  _plateW=cur>0?cur:20;
+  _plateMode='barbell';
+  document.getElementById('pmode-barbell')?.classList.add('active');
+  document.getElementById('pmode-dumbbell')?.classList.remove('active');
+  renderPlateCalc();
+  openModal('modal-plates');
+}
+
+function setPlateMode(m){
+  _plateMode=m;
+  document.getElementById('pmode-barbell')?.classList.toggle('active',m==='barbell');
+  document.getElementById('pmode-dumbbell')?.classList.toggle('active',m==='dumbbell');
+  renderPlateCalc();
+}
+
+function adjPlateWeight(d){
+  _plateW=Math.max(0,parseFloat((_plateW+d).toFixed(1)));
+  renderPlateCalc();
+}
+
+function calcPlatesGreedy(target){
+  let rem=target; const out=[];
+  for(const p of PLATE_SIZES){while(rem>=p-0.001){out.push(p);rem=parseFloat((rem-p).toFixed(3));}}
+  return out;
+}
+
+function renderPlateCalc(){
+  const dispEl=document.getElementById('plate-weight-disp');
+  const hintEl=document.getElementById('plate-mode-hint');
+  const visualEl=document.getElementById('plate-visual');
+  const listEl=document.getElementById('plate-list');
+  const errEl=document.getElementById('plate-error');
+  if(dispEl)dispEl.textContent=_plateW;
+
+  let loadPerSide=0,errMsg='',isBarbell=_plateMode==='barbell';
+  if(isBarbell){
+    if(hintEl)hintEl.textContent=`Bar (${BAR_KG}kg) dahil`;
+    const net=parseFloat((_plateW-BAR_KG).toFixed(3));
+    if(net<0){errMsg=`Minimum ağırlık ${BAR_KG}kg (bar).`;loadPerSide=0;}
+    else{loadPerSide=parseFloat((net/2).toFixed(3));}
+  }else{
+    if(hintEl)hintEl.textContent='Tek dumbbell toplam';
+    loadPerSide=_plateW;
+  }
+
+  if(errEl){errEl.style.display=errMsg?'block':'none';errEl.textContent=errMsg;}
+  if(errMsg){if(visualEl)visualEl.innerHTML='';if(listEl)listEl.innerHTML='';return;}
+
+  const plates=calcPlatesGreedy(loadPerSide);
+  const countMap={};
+  plates.forEach(p=>{countMap[p]=(countMap[p]||0)+1;});
+
+  // Visual barbell/dumbbell
+  function makeDisc(p){
+    const c=PLATE_COLORS[p]||'#888';
+    const h=Math.min(70,Math.max(22,18+p*2));
+    const w=p>=10?14:p>=2.5?10:7;
+    return `<div style="width:${w}px;height:${h}px;background:${c};border-radius:3px;display:flex;align-items:center;justify-content:center;writing-mode:vertical-rl;font-size:8px;font-weight:800;color:#fff;flex-shrink:0">${p>=2.5?p:''}</div>`;
+  }
+
+  let visualHTML='';
+  if(isBarbell){
+    const leftDiscs=[...plates].reverse().map(makeDisc).join('');
+    const rightDiscs=plates.map(makeDisc).join('');
+    visualHTML=`
+      <div class="plate-bar-sleeve" style="width:22px"></div>
+      ${leftDiscs}
+      <div class="plate-bar-center" style="width:60px"></div>
+      ${rightDiscs}
+      <div class="plate-bar-sleeve" style="width:22px"></div>`;
+  }else{
+    const discs=plates.map(makeDisc).join('');
+    visualHTML=`
+      <div class="plate-bar-sleeve" style="width:14px;height:8px"></div>
+      ${discs}
+      <div class="plate-bar-sleeve" style="width:14px;height:8px"></div>`;
+  }
+  if(visualEl)visualEl.innerHTML=plates.length?visualHTML:`<div style="color:var(--success);font-size:13px;text-align:center;width:100%">${isBarbell?'Sadece bar ('+BAR_KG+'kg)':'0 kg'}</div>`;
+
+  // List
+  const listHTML=Object.entries(countMap).sort((a,b)=>b[0]-a[0]).map(([p,cnt])=>{
+    const c=PLATE_COLORS[p]||'#888';
+    const total=isBarbell?cnt*2:cnt;
+    const note=isBarbell?` (her taraf: ${cnt} adet)`:'';
+    return `<div class="plate-item-row">
+      <div class="plate-swatch" style="background:${c}"></div>
+      <div style="flex:1;margin:0 10px;font-size:14px;font-weight:600">${p} kg</div>
+      <div style="font-size:13px;color:var(--text2)">${total} adet${note}</div>
+    </div>`;
+  }).join('');
+  if(listEl)listEl.innerHTML=listHTML||`<div style="text-align:center;color:var(--text3);font-size:13px;padding:4px 0">Plaka yok</div>`;
+}
+
 async function finishWorkout(){
   const w=ST.workout; if(!w)return;
   const woNote=document.getElementById('wo-workout-note')?.value.trim()||'';
@@ -2177,6 +2332,26 @@ function toggleTipExpand(){
   btn.textContent=tipEl._expanded?'kapat':'daha fazla';
 }
 function adjInput(id,delta){const el=document.getElementById(id);if(!el)return;let v=parseFloat(el.value)||0;v=Math.max(0,parseFloat((v+delta).toFixed(1)));el.value=v;haptic('light');SFX.tick();}
+
+// Long-press weight buttons: kısa basış 0.5kg, uzun basış (380ms+) 2.5kg
+const _wadj={timer:null,fired:false,btn:null,short:0};
+function startWAdj(btn,shortD,longD){
+  _wadj.fired=false;_wadj.short=shortD;_wadj.btn=btn;
+  btn.classList.add('lp-active');
+  _wadj.timer=setTimeout(()=>{
+    _wadj.fired=true;
+    adjInput('wo-weight',longD);
+    haptic('medium');
+    showToast((longD>0?'+':'')+longD+'kg');
+    btn.classList.remove('lp-active');
+  },380);
+}
+function endWAdj(){
+  if(_wadj.timer)clearTimeout(_wadj.timer);
+  if(_wadj.btn)_wadj.btn.classList.remove('lp-active');
+  if(!_wadj.fired){adjInput('wo-weight',_wadj.short);_wadj.fired=true;}
+  _wadj.btn=null;
+}
 
 // ============================================================
 // HAPTIC + SOUND ENGINE
@@ -2998,7 +3173,7 @@ function getProgressiveOverloadSuggestion(exId) {
   if (last.weight === 0) return null;
   // If same weight in 2+ sessions → suggest increase
   if (perfs.length >= 2 && perfs[0].weight >= perfs[1].weight) {
-    return { type: 'increase', suggestedWeight: +(last.weight + 2.5).toFixed(1), last };
+    return { type: 'increase', suggestedWeight: +(last.weight + 0.5).toFixed(1), last };
   }
   return { type: 'maintain', suggestedWeight: last.weight, last };
 }
@@ -3654,6 +3829,9 @@ function renderBeslenme() {
     ` : `
     <div class="nut-add-wrap">
       <input class="nut-add-input" id="nut-input" placeholder='Örn: "200gr tavuk göğsü", "1 kase gevrek 200ml süt"...' onkeydown="if(event.key===\'Enter\')addNutritionEntry()" autocomplete="off">
+      <button class="nut-cam-btn" id="nut-cam-btn" onclick="document.getElementById(\'nut-photo-input\').click()" title="Fotoğraftan analiz et">
+        <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+      </button>
       <button class="nut-add-btn" id="nut-add-btn" onclick="addNutritionEntry()">
         <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
       </button>
@@ -3706,6 +3884,90 @@ function setNutDayType(isWorkout) {
 // ============================================================
 const _nutQueue = [];
 let _nutQueueProcessing = false;
+
+// ---- Fotoğraftan beslenme analizi ----
+async function handleNutPhotos(input) {
+  const files = Array.from(input.files || []);
+  if (!files.length) return;
+  input.value = ''; // reset so same file can be selected again
+
+  if (!ST.settings.geminiKey) {
+    showToast('Gemini API key gerekli. Ayarlar → Gemini API Key.', true);
+    return;
+  }
+
+  // Kamera butonunu loading yap
+  const camBtn = document.getElementById('nut-cam-btn');
+  if (camBtn) camBtn.classList.add('loading');
+
+  // Dosyaları base64'e çevir
+  async function toBase64(file) {
+    return new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(r.result.split(',')[1]);
+      r.onerror = rej;
+      r.readAsDataURL(file);
+    });
+  }
+
+  try {
+    const imageParts = await Promise.all(files.map(async f => ({
+      inline_data: { mime_type: f.type || 'image/jpeg', data: await toBase64(f) }
+    })));
+
+    const textPart = {
+      text: `Sen bir beslenme uzmanısın. Bu görsellerdeki yiyecek/ürünü analiz et.
+ÖNCE beslenme etiketi var mı diye bak — varsa değerleri TAMAMEN ETİKETTEN oku, tahmin yapma.
+Etiket yoksa görsel içeriğe göre tahmin et.
+
+Kurallar:
+1. SADECE JSON döndür. Markdown yok, açıklama yok.
+2. Şema: {"name":"string","totalKcal":number,"totalProtein":number,"totalCarbs":number,"totalFat":number,"emoji":"string","source":"label|estimate","portionNote":"string"}
+3. name: Türkçe ürün adı. Gramaj/paket bilgisi varsa ekle (örn: "Dido Gofret Bar (47g)").
+4. Değerler TAM PAKET / GÖRÜNEN PORSİYON için — 100g baz değil.
+5. source: "label" etiket okuduysan, "estimate" tahmin ettiysen.
+6. portionNote: kısa not, örn "47g paket değerleri" veya "1 dilim tahmin".
+SADECE JSON:`
+    };
+
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${ST.settings.geminiModel||'gemini-2.5-flash'}:generateContent?key=${ST.settings.geminiKey}`,
+      { method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ contents: [{ parts: [...imageParts, textPart] }] }) }
+    );
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error.message);
+
+    let raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    raw = raw.replace(/```json|```/g, '').trim();
+    const parsed = JSON.parse(raw);
+
+    const sourceIcon = parsed.source === 'label' ? '🏷️' : '🤖';
+    const pendingId = 'n_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
+    const entry = {
+      id: pendingId,
+      date: todayDateKey(),
+      name: parsed.name || 'Fotoğraf öğünü',
+      calories: Math.round(parsed.totalKcal || 0),
+      protein:  Math.round((parsed.totalProtein || 0) * 10) / 10,
+      carbs:    Math.round((parsed.totalCarbs   || 0) * 10) / 10,
+      fat:      Math.round((parsed.totalFat     || 0) * 10) / 10,
+      emoji: parsed.emoji || '📷',
+      pending: false,
+      fromPhoto: true,
+      portionNote: parsed.portionNote || '',
+      createdAt: Date.now(),
+    };
+    await DB.put('nutritionLogs', entry);
+    ST.nutritionLogs.push(entry);
+    renderBeslenme();
+    showToast(`${sourceIcon} ${parsed.source === 'label' ? 'Etiket okundu' : 'AI tahmini'}: ${entry.name}`);
+  } catch(err) {
+    showToast('📷 Fotoğraf analiz hatası: ' + (err.message || 'API hatası'), true);
+  } finally {
+    if (camBtn) camBtn.classList.remove('loading');
+  }
+}
 
 async function addNutritionEntry() {
   const input = document.getElementById('nut-input');
