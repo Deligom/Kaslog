@@ -561,8 +561,8 @@ canvas{width:100%;height:100%;}
 .nut-cam-btn{position:absolute;right:50px;top:50%;transform:translateY(-50%);width:36px;height:36px;border-radius:10px;background:var(--surface2);border:1.5px solid var(--border);display:flex;align-items:center;justify-content:center;transition:var(--transition);}
 .nut-cam-btn:active{transform:translateY(-50%) scale(0.9);background:var(--accent-dim);}
 .nut-cam-btn svg{width:18px;height:18px;stroke:var(--text2);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;}
-.nut-cam-btn.loading{background:var(--surface3);pointer-events:none;}
-.nut-cam-btn.loading svg{stroke:var(--text3);}
+.nut-cam-btn.has-photos{background:var(--accent-dim);border-color:var(--accent);}
+.nut-cam-btn.has-photos svg{stroke:var(--accent);}
 .nut-entry-list{margin:0 20px;}
 .nut-entry{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 14px;margin-bottom:8px;display:flex;align-items:center;gap:10px;}
 .nut-entry-icon{font-size:22px;flex-shrink:0;}
@@ -599,6 +599,21 @@ canvas{width:100%;height:100%;}
 .nut-day-btn{flex:1;padding:8px;border-radius:10px;font-size:13px;font-weight:600;background:var(--surface2);color:var(--text2);border:1.5px solid var(--border);text-align:center;cursor:pointer;transition:var(--transition);}
 .nut-day-btn.active{background:var(--accent-dim);color:var(--accent);border-color:var(--accent);}
 @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+
+/* Fotoğraf önizleme strip */
+.nut-photo-strip{margin:0 20px 10px;display:flex;gap:8px;flex-wrap:wrap;}
+.nut-photo-thumb{position:relative;width:72px;height:72px;border-radius:10px;overflow:hidden;border:1.5px solid var(--border);flex-shrink:0;}
+.nut-photo-thumb img{width:100%;height:100%;object-fit:cover;}
+.nut-photo-thumb-del{position:absolute;top:3px;right:3px;width:20px;height:20px;border-radius:50%;background:rgba(0,0,0,0.65);color:#fff;font-size:13px;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;border:none;font-weight:700;}
+.nut-photo-thumb-del:active{transform:scale(0.88);}
+.nut-photo-send-row{margin:0 20px 10px;display:flex;gap:8px;align-items:center;}
+.nut-photo-send-btn{flex:1;height:42px;border-radius:10px;background:var(--accent);color:#fff;font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;transition:var(--transition);}
+.nut-photo-send-btn:active{transform:scale(0.97);}
+.nut-photo-send-btn svg{width:16px;height:16px;stroke:#fff;fill:none;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;}
+.nut-photo-cancel-btn{height:42px;padding:0 14px;border-radius:10px;background:var(--surface2);color:var(--text2);font-size:13px;font-weight:600;cursor:pointer;border:1px solid var(--border);transition:var(--transition);}
+.nut-photo-cancel-btn:active{transform:scale(0.96);}
+/* URL key banner */
+.url-key-banner{margin:0 20px 10px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);border-radius:10px;padding:8px 14px;font-size:12px;color:var(--success);display:flex;align-items:center;gap:6px;}
 
 </style>
 </head>
@@ -897,7 +912,7 @@ canvas{width:100%;height:100%;}
 <div id="toast-el"></div>
 <div id="pr-banner"><div class="pr-banner-inner" id="pr-banner-inner">🏆 YENİ REKOR!</div></div>
 <!-- Hidden file input for nutrition photo -->
-<input type="file" id="nut-photo-input" accept="image/*" multiple style="display:none" onchange="handleNutPhotos(this)">
+<input type="file" id="nut-photo-input" accept="image/*" multiple style="display:none" onchange="onNutPhotoSelected(this)">
 
 <!-- Exercise Progress Modal -->
 <div class="modal-backdrop" id="modal-ex-progress">
@@ -954,6 +969,70 @@ canvas{width:100%;height:100%;}
 </div><!-- /app -->
 
 <script>
+// ============================================================
+// GEMINI PROXY — Güvenli API Erişimi
+// ============================================================
+
+// ⚠️  Vercel deploy ettikten sonra kendi URL'ini yaz:
+const PROXY_URL = 'https://kaslog-proxy.vercel.app/api/gemini';
+
+// ⚠️  Bu değeri Vercel env var'ındaki APP_SECRET ile AYNI yap:
+//     Vercel Dashboard → Settings → Environment Variables → APP_SECRET
+const APP_SECRET = '3f8a2b9c1d4e5f607890ab1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f708192a3b4';
+
+// HMAC-SHA256 imzası — Web Crypto API (native, kütüphane yok)
+async function _signPayload(payload) {
+  const timestamp = Date.now();
+  // 16 byte kriptografik rastgele nonce
+  const nonceBytes = new Uint8Array(16);
+  crypto.getRandomValues(nonceBytes);
+  const nonce = Array.from(nonceBytes).map(b => b.toString(16).padStart(2,'0')).join('');
+
+  const message = `${timestamp}:${nonce}:${JSON.stringify(payload)}`;
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(APP_SECRET),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const sigBuf = await crypto.subtle.sign('HMAC', keyMaterial, new TextEncoder().encode(message));
+  const signature = Array.from(new Uint8Array(sigBuf))
+    .map(b => b.toString(16).padStart(2,'0')).join('');
+
+  return { timestamp, nonce, signature };
+}
+
+// Gemini çağrısı — kişisel key varsa direkt, yoksa güvenli proxy
+async function callGemini(contents, model) {
+  model = model || ST.settings.geminiModel || 'gemini-2.5-flash';
+
+  // Kişisel key ayarlı → direkt çağrı (gelişmiş kullanıcılar için)
+  if (ST.settings.geminiKey?.trim()) {
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${ST.settings.geminiKey.trim()}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents }) }
+    );
+    return resp.json();
+  }
+
+  // Proxy üzerinden — HMAC imzalı istek
+  const payload = { model, contents };
+  const { timestamp, nonce, signature } = await _signPayload(payload);
+
+  const resp = await fetch(PROXY_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ payload, timestamp, nonce, signature }),
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err.error || `Proxy hatası (${resp.status})`);
+  }
+  return resp.json();
+}
+
 // ============================================================
 // DB
 // ============================================================
@@ -2789,8 +2868,9 @@ function renderAyarlar(){
     <div class="page-pad" style="padding-bottom:12px;padding-top:4px"><div class="section-title">🍽️ BESLENME</div></div>
     <div class="settings-section"><div class="settings-block">
       <div class="settings-row" style="flex-direction:column;align-items:stretch;gap:8px;cursor:default">
-        <div class="settings-row-left"><div class="settings-icon si-orange">🤖</div><div><div class="settings-row-title">Gemini API Key</div><div class="settings-row-sub">Besin analizi için</div></div></div>
-        <input class="form-input" id="gemini-key-input" type="password" placeholder="AIza..." value="${s.geminiKey||''}" style="font-size:13px;padding:10px 12px;" onchange="saveGeminiKey(this.value)">
+        <div class="settings-row-left"><div class="settings-icon si-orange">🤖</div><div><div class="settings-row-title">Gemini API Key</div><div class="settings-row-sub">Opsiyonel — boş bırakırsan proxy kullanılır</div></div></div>
+        <div style="font-size:11px;padding:7px 10px;border-radius:8px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);color:var(--success)">🔒 Proxy aktif — key gerekmeden AI analizi çalışıyor</div>
+        <input class="form-input" id="gemini-key-input" type="password" placeholder="Kendi key'ini girmek istersen: AIza..." value="${s.geminiKey||''}" style="font-size:13px;padding:10px 12px;" onchange="saveGeminiKey(this.value)">
       </div>
       <div class="settings-row" style="flex-direction:column;align-items:stretch;gap:8px;cursor:default">
         <div class="settings-row-left"><div class="settings-icon si-blue">🧠</div><div><div class="settings-row-title">Gemini Model</div><div class="settings-row-sub">Besin analizi için kullanılır</div></div></div>
@@ -3820,23 +3900,32 @@ function renderBeslenme() {
       </div>
     </div>
 
-    ${!hasKey ? `
-    <div class="nut-no-key">
-      <div style="font-size:28px;margin-bottom:8px">🤖</div>
-      <div class="nut-no-key-text">Gemini AI ile besin analizi için API key gerekiyor.<br>Ayarlar → Gemini API Key'e gir.</div>
-      <button class="btn btn-primary" onclick="navTo('ayarlar')" style="width:100%">Ayarlara Git →</button>
-    </div>
-    ` : `
     <div class="nut-add-wrap">
       <input class="nut-add-input" id="nut-input" placeholder='Örn: "200gr tavuk göğsü", "1 kase gevrek 200ml süt"...' onkeydown="if(event.key===\'Enter\')addNutritionEntry()" autocomplete="off">
-      <button class="nut-cam-btn" id="nut-cam-btn" onclick="document.getElementById(\'nut-photo-input\').click()" title="Fotoğraftan analiz et">
+      <button class="nut-cam-btn${_nutSelectedPhotos.length>0?' has-photos':''}" id="nut-cam-btn" onclick="document.getElementById(\'nut-photo-input\').click()" title="Fotoğraftan analiz et">
         <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
       </button>
       <button class="nut-add-btn" id="nut-add-btn" onclick="addNutritionEntry()">
         <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
       </button>
     </div>
-    `}
+    ${_nutSelectedPhotos.length > 0 ? `
+    <div class="nut-photo-strip" id="nut-photo-strip">
+      ${_nutSelectedPhotos.map((p,i) => `
+        <div class="nut-photo-thumb">
+          <img src="${p.dataUrl}" alt="Fotoğraf ${i+1}">
+          <button class="nut-photo-thumb-del" onclick="removeNutPhoto(${i})">✕</button>
+        </div>
+      `).join('')}
+    </div>
+    <div class="nut-photo-send-row">
+      <button class="nut-photo-send-btn" onclick="sendNutPhotos()">
+        <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+        ${_nutSelectedPhotos.length} Fotoğrafı Analiz Et
+      </button>
+      <button class="nut-photo-cancel-btn" onclick="clearNutPhotos()">İptal</button>
+    </div>
+    ` : ''}
 
     <div class="section-title" style="padding:0 20px;margin-bottom:12px">BUGÜNKÜ ÖĞÜNLER</div>
     <div class="nut-entry-list">
@@ -3885,22 +3974,51 @@ function setNutDayType(isWorkout) {
 const _nutQueue = [];
 let _nutQueueProcessing = false;
 
-// ---- Fotoğraftan beslenme analizi ----
-async function handleNutPhotos(input) {
+// ---- Fotoğraf seçim & önizleme sistemi ----
+let _nutSelectedPhotos = []; // [{file, dataUrl}]
+
+async function onNutPhotoSelected(input) {
   const files = Array.from(input.files || []);
   if (!files.length) return;
-  input.value = ''; // reset so same file can be selected again
+  input.value = '';
 
-  if (!ST.settings.geminiKey) {
-    showToast('Gemini API key gerekli. Ayarlar → Gemini API Key.', true);
-    return;
+  // Her dosyayı dataUrl'e çevir ve listeye ekle
+  for (const file of files) {
+    const dataUrl = await new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(r.result);
+      r.onerror = rej;
+      r.readAsDataURL(file);
+    });
+    _nutSelectedPhotos.push({ file, dataUrl });
   }
+  renderBeslenme();
+}
 
-  // Kamera butonunu loading yap
+function removeNutPhoto(idx) {
+  _nutSelectedPhotos.splice(idx, 1);
+  renderBeslenme();
+}
+
+function clearNutPhotos() {
+  _nutSelectedPhotos = [];
+  renderBeslenme();
+}
+
+async function sendNutPhotos() {
+  if (!_nutSelectedPhotos.length) return;
+  await handleNutPhotos(_nutSelectedPhotos.map(p => p.file));
+  _nutSelectedPhotos = [];
+  renderBeslenme();
+}
+
+// ---- Fotoğraftan beslenme analizi ----
+async function handleNutPhotos(files) {
+  if (!files.length) return;
+
   const camBtn = document.getElementById('nut-cam-btn');
   if (camBtn) camBtn.classList.add('loading');
 
-  // Dosyaları base64'e çevir
   async function toBase64(file) {
     return new Promise((res, rej) => {
       const r = new FileReader();
@@ -3917,6 +4035,7 @@ async function handleNutPhotos(input) {
 
     const textPart = {
       text: `Sen bir beslenme uzmanısın. Bu görsellerdeki yiyecek/ürünü analiz et.
+Birden fazla fotoğraf varsa aynı ürünün farklı tarafları olabilir — hepsini birlikte değerlendir.
 ÖNCE beslenme etiketi var mı diye bak — varsa değerleri TAMAMEN ETİKETTEN oku, tahmin yapma.
 Etiket yoksa görsel içeriğe göre tahmin et.
 
@@ -3930,12 +4049,7 @@ Kurallar:
 SADECE JSON:`
     };
 
-    const resp = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${ST.settings.geminiModel||'gemini-2.5-flash'}:generateContent?key=${ST.settings.geminiKey}`,
-      { method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ contents: [{ parts: [...imageParts, textPart] }] }) }
-    );
-    const data = await resp.json();
+    const data = await callGemini([{ parts: [...imageParts, textPart] }]);
     if (data.error) throw new Error(data.error.message);
 
     let raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
@@ -3973,11 +4087,6 @@ async function addNutritionEntry() {
   const input = document.getElementById('nut-input');
   const text  = input?.value?.trim();
   if (!text) return;
-
-  if (!ST.settings.geminiKey) {
-    showToast('Gemini API key gerekli. Ayarlar → Gemini API Key.', true);
-    return;
-  }
 
   // Hemen listede göster — pending durumda
   const pendingId = 'n_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
@@ -4017,12 +4126,7 @@ Kurallar:
 Giriş: "${text}"
 SADECE JSON:`;
 
-    const resp = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${ST.settings.geminiModel||'gemini-2.5-flash'}:generateContent?key=${ST.settings.geminiKey}`,
-      { method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({contents:[{parts:[{text:prompt}]}]}) }
-    );
-    const data = await resp.json();
+    const data = await callGemini([{ parts: [{ text: prompt }] }]);
     if (data.error) throw new Error(data.error.message);
     let raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     raw = raw.replace(/```json|```/g,'').trim();
@@ -4077,6 +4181,8 @@ async function init(){
   await DB.open();
   const savedSettings=await DB.get('settings','main');
   if(savedSettings){ST.settings={...ST.settings,...savedSettings};delete ST.settings.id;}
+
+  // URL key artık kullanılmıyor — proxy ile güvenli erişim sağlanıyor
   ST.routines=await DB.getAll('routines');
   ST.workoutLogs=await DB.getAll('workoutLogs');
   ST.measurements=await DB.getAll('measurements');
