@@ -615,32 +615,6 @@ canvas{width:100%;height:100%;}
 /* URL key banner */
 .url-key-banner{margin:0 20px 10px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);border-radius:10px;padding:8px 14px;font-size:12px;color:var(--success);display:flex;align-items:center;gap:6px;}
 
-/* AI LOG STYLES */
-.ai-preset-btn{width:100%;padding:13px 16px;border-radius:12px;background:var(--surface2);border:1.5px solid var(--border);color:var(--text);font-size:13px;font-weight:500;text-align:left;cursor:pointer;transition:var(--transition);line-height:1.4;}
-.ai-preset-btn:active{background:var(--accent-dim);border-color:var(--accent);color:var(--accent);}
-.ai-custom-wrap{display:flex;gap:8px;margin-top:4px;}
-.ai-custom-input{flex:1;background:var(--surface2);border:1.5px solid var(--border);border-radius:12px;padding:11px 14px;font-size:14px;color:var(--text);}
-.ai-custom-input:focus{border-color:var(--accent);outline:none;background:var(--surface);}
-.ai-custom-input::placeholder{color:var(--text3);}
-.ai-custom-send{width:44px;height:44px;border-radius:12px;background:var(--accent);display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;transition:var(--transition);}
-.ai-custom-send:active{transform:scale(0.9);}
-.ai-custom-send svg{width:18px;height:18px;stroke:#fff;fill:none;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;}
-.ai-thinking{display:flex;align-items:center;gap:10px;padding:16px;color:var(--text2);font-size:13px;}
-@keyframes aiDot{0%,80%,100%{transform:scale(0.6);opacity:0.4}40%{transform:scale(1);opacity:1}}
-.ai-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);display:inline-block;}
-.ai-dot:nth-child(1){animation:aiDot 1.2s ease-in-out 0s infinite;}
-.ai-dot:nth-child(2){animation:aiDot 1.2s ease-in-out 0.2s infinite;}
-.ai-dot:nth-child(3){animation:aiDot 1.2s ease-in-out 0.4s infinite;}
-.ai-result-wrap{padding:4px 0 8px;}
-.ai-result-text{font-size:14px;color:var(--text);line-height:1.7;white-space:pre-wrap;word-break:break-word;}
-.ai-result-text table{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px;}
-.ai-result-text th{background:var(--surface3);padding:6px 10px;text-align:left;font-weight:700;border:1px solid var(--border);}
-.ai-result-text td{padding:6px 10px;border:1px solid var(--border);vertical-align:top;}
-.ai-result-text strong,.ai-result-text b{color:var(--accent);}
-.ai-export-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;}
-.ai-export-btn{padding:12px;border-radius:12px;background:var(--surface2);border:1.5px solid var(--border);font-size:13px;font-weight:600;color:var(--text);text-align:center;cursor:pointer;transition:var(--transition);}
-.ai-export-btn:active{transform:scale(0.96);background:var(--accent-dim);border-color:var(--accent);}
-
 </style>
 </head>
 <body>
@@ -992,87 +966,9 @@ canvas{width:100%;height:100%;}
   </div>
 </div>
 
-<!-- AI Log Analiz Modal -->
-<div class="modal-backdrop" id="modal-ai-log">
-  <div class="modal-sheet" style="max-height:92vh">
-    <div class="modal-handle"></div>
-    <div class="modal-header">
-      <div class="modal-title">🤖 AI Antrenman Analizi</div>
-      <button class="modal-close" onclick="closeModal('modal-ai-log')">✕</button>
-    </div>
-    <div class="modal-body" id="ai-log-body">
-      <!-- içerik JS ile doldurulur -->
-    </div>
-  </div>
-</div>
-
 </div><!-- /app -->
 
 <script>
-// ============================================================
-// GEMINI PROXY — Güvenli API Erişimi
-// ============================================================
-
-// ⚠️  Vercel deploy ettikten sonra kendi URL'ini yaz:
-const PROXY_URL = 'https://kaslog19.vercel.app/api/gemini';
-
-// ⚠️  Bu değeri Vercel env var'ındaki APP_SECRET ile AYNI yap:
-//     Vercel Dashboard → Settings → Environment Variables → APP_SECRET
-const APP_SECRET = '3f8a2b9c1d4e5f607890ab1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f708192a3b4';
-
-// HMAC-SHA256 imzası — Web Crypto API (native, kütüphane yok)
-async function _signPayload(payload) {
-  const timestamp = Date.now();
-  // 16 byte kriptografik rastgele nonce
-  const nonceBytes = new Uint8Array(16);
-  crypto.getRandomValues(nonceBytes);
-  const nonce = Array.from(nonceBytes).map(b => b.toString(16).padStart(2,'0')).join('');
-
-  const message = `${timestamp}:${nonce}:${JSON.stringify(payload)}`;
-  const keyMaterial = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(APP_SECRET),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
-  const sigBuf = await crypto.subtle.sign('HMAC', keyMaterial, new TextEncoder().encode(message));
-  const signature = Array.from(new Uint8Array(sigBuf))
-    .map(b => b.toString(16).padStart(2,'0')).join('');
-
-  return { timestamp, nonce, signature };
-}
-
-// Gemini çağrısı — kişisel key varsa direkt, yoksa güvenli proxy
-async function callGemini(contents, model) {
-  model = model || ST.settings.geminiModel || 'gemini-2.5-flash';
-
-  // Kişisel key ayarlı → direkt çağrı (gelişmiş kullanıcılar için)
-  if (ST.settings.geminiKey?.trim()) {
-    const resp = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${ST.settings.geminiKey.trim()}`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents }) }
-    );
-    return resp.json();
-  }
-
-  // Proxy üzerinden — HMAC imzalı istek
-  const payload = { model, contents };
-  const { timestamp, nonce, signature } = await _signPayload(payload);
-
-  const resp = await fetch(PROXY_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ payload, timestamp, nonce, signature }),
-  });
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({}));
-    throw new Error(err.error || `Proxy hatası (${resp.status})`);
-  }
-  return resp.json();
-}
-
 // ============================================================
 // DB
 // ============================================================
@@ -2908,9 +2804,9 @@ function renderAyarlar(){
     <div class="page-pad" style="padding-bottom:12px;padding-top:4px"><div class="section-title">🍽️ BESLENME</div></div>
     <div class="settings-section"><div class="settings-block">
       <div class="settings-row" style="flex-direction:column;align-items:stretch;gap:8px;cursor:default">
-        <div class="settings-row-left"><div class="settings-icon si-orange">🤖</div><div><div class="settings-row-title">Gemini API Key</div><div class="settings-row-sub">Opsiyonel — boş bırakırsan proxy kullanılır</div></div></div>
-        <div style="font-size:11px;padding:7px 10px;border-radius:8px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);color:var(--success)">🔒 Proxy aktif — key gerekmeden AI analizi çalışıyor</div>
-        <input class="form-input" id="gemini-key-input" type="password" placeholder="Kendi key'ini girmek istersen: AIza..." value="${s.geminiKey||''}" style="font-size:13px;padding:10px 12px;" onchange="saveGeminiKey(this.value)">
+        <div class="settings-row-left"><div class="settings-icon si-orange">🤖</div><div><div class="settings-row-title">Gemini API Key</div><div class="settings-row-sub">Besin analizi için</div></div></div>
+        ${s._keyFromUrl ? `<div style="font-size:11px;padding:7px 10px;border-radius:8px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);color:var(--success)">🔗 Link üzerinden yüklendi — kendi key'ini girmek için aşağıya yaz</div>` : ''}
+        <input class="form-input" id="gemini-key-input" type="password" placeholder="AIza..." value="${s.geminiKey||''}" style="font-size:13px;padding:10px 12px;" onchange="saveGeminiKey(this.value)">
       </div>
       <div class="settings-row" style="flex-direction:column;align-items:stretch;gap:8px;cursor:default">
         <div class="settings-row-left"><div class="settings-icon si-blue">🧠</div><div><div class="settings-row-title">Gemini Model</div><div class="settings-row-sub">Besin analizi için kullanılır</div></div></div>
@@ -2961,7 +2857,6 @@ function renderAyarlar(){
     <div class="settings-section"><div class="settings-block">
       <div class="settings-row" onclick="openExportModal()"><div class="settings-row-left"><div class="settings-icon si-green">📤</div><div><div class="settings-row-title">${T('export_data')}</div><div class="settings-row-sub">${T('export_desc')}</div></div></div><div class="settings-row-value"><svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></div></div>
       <div class="settings-row" onclick="openImportModal()"><div class="settings-row-left"><div class="settings-icon si-blue">📥</div><div><div class="settings-row-title">${T('import_data')}</div><div class="settings-row-sub">${T('import_desc')}</div></div></div><div class="settings-row-value"><svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></div></div>
-      <div class="settings-row" onclick="openAILogModal()"><div class="settings-row-left"><div class="settings-icon si-orange">🤖</div><div><div class="settings-row-title">AI Antrenman Analizi</div><div class="settings-row-sub">Gelişim tablosu, öneriler, PR analizi</div></div></div><div class="settings-row-value"><svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></div></div>
       <div class="settings-row" onclick="clearData()"><div class="settings-row-left"><div class="settings-icon si-red">🗑️</div><div><div class="settings-row-title" style="color:var(--danger)">${T('delete_data')}</div><div class="settings-row-sub">${T('delete_sub')}</div></div></div><div class="settings-row-value"><svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></div></div>
     </div></div>
     <div style="text-align:center;padding:20px;color:var(--text3);font-size:12px">KASLOG v2.1 · Home Workout Tracker</div>
@@ -3091,12 +2986,7 @@ function openHistoryDetail(logId){
         <div><div style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:700">${log.totalVolume||0}</div><div style="font-size:11px;color:var(--text2)">kg ${T('volume')}</div></div>
       </div>
     </div>
-    <div class="card" style="margin-bottom:16px;overflow:hidden">${exHTML}</div>
-    ${log.note?`<div style="margin:0 0 16px;background:var(--surface2);border-radius:10px;padding:12px 14px"><div style="font-size:11px;font-weight:700;letter-spacing:0.8px;color:var(--text2);text-transform:uppercase;margin-bottom:4px">📝 Antrenman Notu</div><div style="font-size:13px;color:var(--text)">${log.note}</div></div>`:''}
-    <div class="ai-export-row" style="margin-bottom:8px">
-      <button class="ai-export-btn" onclick="exportSingleLogCSV('${log.id}')">📊 CSV İndir<br><span style="font-size:11px;font-weight:400;color:var(--text2)">Bu seans</span></button>
-      <button class="ai-export-btn" onclick="closeModal('modal-history-detail');openAILogModal()">🤖 AI Analizi<br><span style="font-size:11px;font-weight:400;color:var(--text2)">Tüm geçmiş</span></button>
-    </div>`;
+    <div class="card" style="margin-bottom:20px;overflow:hidden">${exHTML}</div>${log.note?`<div style="margin:0 0 16px;background:var(--surface2);border-radius:10px;padding:12px 14px"><div style="font-size:11px;font-weight:700;letter-spacing:0.8px;color:var(--text2);text-transform:uppercase;margin-bottom:4px">📝 Antrenman Notu</div><div style="font-size:13px;color:var(--text)">${log.note}</div></div>`:''}`;
   openModal('modal-history-detail');
 }
 
@@ -3105,26 +2995,14 @@ function openHistoryDetail(logId){
 // ============================================================
 function openExportModal(){
   document.getElementById('data-modal-title').textContent=T('export_data');
-  // Toplam set sayısını hesapla
-  const totalSets = ST.workoutLogs.reduce((acc, log) => {
-    return acc + (log.exercises||[]).reduce((a, ex) => a + (ex.sets||[]).length, 0);
-  }, 0);
   document.getElementById('data-modal-content').innerHTML=`
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px">
-      <div style="text-align:center;background:var(--surface2);border-radius:12px;padding:14px 8px"><div style="font-family:'Barlow Condensed',sans-serif;font-size:28px;font-weight:800;color:var(--accent)">${ST.workoutLogs.length}</div><div style="font-size:11px;color:var(--text2)">Seans</div></div>
-      <div style="text-align:center;background:var(--surface2);border-radius:12px;padding:14px 8px"><div style="font-family:'Barlow Condensed',sans-serif;font-size:28px;font-weight:800;color:var(--accent)">${totalSets}</div><div style="font-size:11px;color:var(--text2)">Toplam Set</div></div>
-      <div style="text-align:center;background:var(--surface2);border-radius:12px;padding:14px 8px"><div style="font-family:'Barlow Condensed',sans-serif;font-size:28px;font-weight:800;color:var(--accent)">${ST.measurements.length}</div><div style="font-size:11px;color:var(--text2)">Ölçüm</div></div>
+    <div style="background:var(--surface2);border-radius:10px;padding:14px 16px;margin-bottom:20px;font-size:13px;color:var(--text2);line-height:1.6">${T('export_desc')}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:20px">
+      <div style="text-align:center;background:var(--surface2);border-radius:12px;padding:14px 8px"><div style="font-family:'Barlow Condensed',sans-serif;font-size:28px;font-weight:800;color:var(--accent)">${ST.workoutLogs.length}</div><div style="font-size:11px;color:var(--text2)">${T('sessions')}</div></div>
+      <div style="text-align:center;background:var(--surface2);border-radius:12px;padding:14px 8px"><div style="font-family:'Barlow Condensed',sans-serif;font-size:28px;font-weight:800;color:var(--accent)">${ST.routines.length}</div><div style="font-size:11px;color:var(--text2)">${T('my_routines')}</div></div>
+      <div style="text-align:center;background:var(--surface2);border-radius:12px;padding:14px 8px"><div style="font-family:'Barlow Condensed',sans-serif;font-size:28px;font-weight:800;color:var(--accent)">${ST.measurements.length}</div><div style="font-size:11px;color:var(--text2)">${T('body_measurements')}</div></div>
     </div>
-    <div style="font-size:12px;font-weight:700;letter-spacing:1px;color:var(--text2);text-transform:uppercase;margin-bottom:10px">📤 Dışa Aktar</div>
-    <div class="ai-export-row">
-      <button class="ai-export-btn" onclick="exportData()">💾 JSON Yedek<br><span style="font-size:11px;font-weight:400;color:var(--text2)">Tam veri yedeği</span></button>
-      <button class="ai-export-btn" onclick="exportCSV()">📊 CSV (Excel)<br><span style="font-size:11px;font-weight:400;color:var(--text2)">Set bazlı log</span></button>
-    </div>
-    <div style="font-size:12px;font-weight:700;letter-spacing:1px;color:var(--text2);text-transform:uppercase;margin-bottom:10px">🤖 AI Analizi</div>
-    <button class="btn btn-primary btn-full" onclick="closeModal('modal-data');openAILogModal()" style="margin-bottom:10px">
-      🤖 AI'a Sor — Gelişim & Tablo Analizi
-    </button>
-    <div style="font-size:11px;color:var(--text3);text-align:center;line-height:1.5">Tüm antrenman geçmişin Gemini'ye gönderilir.<br>Tablo, gelişim analizi, öneriler alabilirsin.</div>`;
+    <button class="btn btn-primary btn-full" onclick="exportData()">📤 ${T('export_data')}</button>`;
   openModal('modal-data');
 }
 
@@ -3139,237 +3017,6 @@ function exportData(){
   URL.revokeObjectURL(url);
   closeModal('modal-data');
   setTimeout(()=>showToast(T('export_success')),400);
-}
-
-function exportCSV() {
-  const allEx = getAllExercises();
-  const rows = [['Tarih','Gün','Egzersiz','Kas Grubu','Set No','Isınma?','Ağırlık (kg)','Tekrar','Hacim (kg)','Not']];
-  const sorted = [...ST.workoutLogs].sort((a,b)=>new Date(a.date)-new Date(b.date));
-  for (const log of sorted) {
-    const dateStr = new Date(log.date).toLocaleDateString('tr-TR');
-    const dayName = translateDayName(log.dayName||'Workout');
-    for (const ex of (log.exercises||[])) {
-      if (ex.skipped) continue;
-      const exData = allEx.find(e=>e.id===ex.exId)||{name:ex.exId,muscle:''};
-      let setNo = 0;
-      for (const s of (ex.sets||[])) {
-        if (!s.isWarmup) setNo++;
-        const vol = (s.weight||0)*(s.reps||0);
-        rows.push([
-          dateStr, dayName, exData.name, exData.muscle,
-          s.isWarmup ? 'ısınma' : setNo,
-          s.isWarmup ? 'Evet' : 'Hayır',
-          s.weight||0, s.reps||0, vol,
-          (s.note||'').replace(/,/g,' ')
-        ]);
-      }
-    }
-  }
-  const csv = rows.map(r=>r.map(v=>`"${v}"`).join(',')).join('\n');
-  const bom = '\uFEFF'; // UTF-8 BOM for Excel
-  const blob = new Blob([bom+csv],{type:'text/csv;charset=utf-8'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  const date = new Date().toISOString().slice(0,10);
-  a.href=url; a.download=`kaslog-log-${date}.csv`; a.click();
-  URL.revokeObjectURL(url);
-  closeModal('modal-data');
-  setTimeout(()=>showToast('📊 CSV indirildi'),400);
-}
-
-// ============================================================
-// AI LOG ANALİZİ
-// ============================================================
-function _buildWorkoutLogText() {
-  const allEx = getAllExercises();
-  const sorted = [...ST.workoutLogs].sort((a,b)=>new Date(a.date)-new Date(b.date));
-  const lines = [];
-  lines.push(`Kullanıcı: ${ST.settings.name || 'Sporcu'}`);
-  lines.push(`Seviye: ${ST.settings.level || '-'}, Hedef: ${ST.settings.goal || '-'}`);
-  lines.push(`Toplam seans: ${sorted.length}`);
-  lines.push('---');
-  for (const log of sorted) {
-    const d = new Date(log.date).toLocaleDateString('tr-TR');
-    const dayName = translateDayName(log.dayName||'Workout');
-    lines.push(`\n📅 ${d} — ${dayName} (${log.duration || 0} dk, toplam hacim: ${log.totalVolume || 0}kg)`);
-    if (log.note) lines.push(`   Not: ${log.note}`);
-    for (const ex of (log.exercises||[])) {
-      if (ex.skipped) continue;
-      const exData = allEx.find(e=>e.id===ex.exId)||{name:ex.exId,muscle:''};
-      const workSets = (ex.sets||[]).filter(s=>!s.isWarmup);
-      const warmSets = (ex.sets||[]).filter(s=>s.isWarmup);
-      if (!workSets.length) continue;
-      const setStr = workSets.map((s,i)=>`Set${i+1}: ${s.weight}kg×${s.reps}rep${s.note?` [${s.note}]`:''}`).join(', ');
-      const warmStr = warmSets.length ? ` | Isınma: ${warmSets.map(s=>`${s.weight}kg×${s.reps}`).join(', ')}` : '';
-      const vol = workSets.reduce((a,s)=>a+(s.weight||0)*(s.reps||0),0);
-      lines.push(`   • ${exData.name} (${exData.muscle}) — ${setStr}${warmStr} = ${Math.round(vol)}kg hacim`);
-    }
-  }
-  // PRs
-  const prList = Object.values(ST.prs);
-  if (prList.length) {
-    lines.push('\n🏆 KİŞİSEL REKORLAR:');
-    for (const pr of prList) {
-      const exData = allEx.find(e=>e.id===pr.exId)||{name:pr.exId};
-      const d = pr.date ? new Date(pr.date).toLocaleDateString('tr-TR') : '';
-      lines.push(`   • ${exData.name}: ${pr.weight}kg × ${pr.reps}rep ${d?'('+d+')':''}`);
-    }
-  }
-  return lines.join('\n');
-}
-
-function openAILogModal() {
-  const body = document.getElementById('ai-log-body');
-  body.innerHTML = `
-    <div style="font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:14px;background:var(--surface2);border-radius:10px;padding:12px 14px">
-      📋 <strong style="color:var(--text)">${ST.workoutLogs.length} seans</strong> verimle AI'a ne sormak istiyorsun?
-    </div>
-    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
-      <button class="ai-preset-btn" onclick="runAILog('Antrenman verilerimi analiz et. Son 4 haftanın haftalık özet tablosunu çıkar: haftada kaç seans yaptım, toplam antrenman süresi ve toplam hacim (kg).')">📊 Haftalık özet tablo</button>
-      <button class="ai-preset-btn" onclick="runAILog('Her egzersiz için zaman içindeki ağırlık gelişimimi göster. Başlangıç ağırlığım ile şimdiki ağırlığımı karşılaştır, kaç kg ilerleme kaydettiğimi ve yüzde gelişimimi belirt.')">📈 Egzersiz bazlı gelişim</button>
-      <button class="ai-preset-btn" onclick="runAILog('Kas gruplarına göre antrenman dağılımımı analiz et. Hangi kas gruplarını ne sıklıkla çalıştırıyorum? Baskın ve ihmal edilen kas grupları hangileri? Denge önerileri ver.')">💪 Kas grubu dengesi</button>
-      <button class="ai-preset-btn" onclick="runAILog('PR kayıtlarımı ve en iyi performanslarımı listele. Her egzersizde en yüksek ağırlık, tekrar ve toplam hacim nedir? Hangi egzersizlerde en çok gelişim var?')">🏆 PR ve en iyi performanslar</button>
-      <button class="ai-preset-btn" onclick="runAILog('Antrenman tutarlılığımı değerlendir. Haftada ortalama kaç seans yapıyorum, seans başına ortalama süre ve hacim nedir? Son 1 ay ile öncesini karşılaştır.')">🔥 Tutarlılık & trend analizi</button>
-      <button class="ai-preset-btn" onclick="runAILog('Tüm antrenman verilerime göre gelişimim için somut öneriler ver: hangi egzersizlerde ağırlık artırma zamanı geldi, hangi kas grupları daha fazla çalışmalı, program düzeni nasıl iyileştirilebilir?')">🎯 Genel öneriler & program analizi</button>
-    </div>
-    <div style="font-size:12px;font-weight:700;letter-spacing:1px;color:var(--text2);text-transform:uppercase;margin-bottom:8px">Özel soru sor</div>
-    <div class="ai-custom-wrap">
-      <input class="ai-custom-input" id="ai-custom-q" placeholder="Örn: Squat gelişimimi göster..." onkeydown="if(event.key==='Enter')runAILogCustom()">
-      <div class="ai-custom-send" onclick="runAILogCustom()">
-        <svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-      </div>
-    </div>
-  `;
-  openModal('modal-ai-log');
-}
-
-function runAILogCustom() {
-  const q = document.getElementById('ai-custom-q')?.value?.trim();
-  if (!q) return;
-  runAILog(q);
-}
-
-async function runAILog(question) {
-  const body = document.getElementById('ai-log-body');
-  const logText = _buildWorkoutLogText();
-
-  // Loading UI
-  body.innerHTML = `
-    <div style="margin-bottom:16px;font-size:13px;color:var(--text2);background:var(--surface2);border-radius:10px;padding:10px 14px;line-height:1.5">
-      🤖 <em>"${question.slice(0,80)}${question.length>80?'…':''}"</em>
-    </div>
-    <div class="ai-thinking">
-      <div class="ai-dot"></div><div class="ai-dot"></div><div class="ai-dot"></div>
-      <span style="margin-left:4px">Analiz ediliyor...</span>
-    </div>
-  `;
-
-  const prompt = `Sen bir fitness koçu ve veri analistisin. Kullanıcının KASLOG uygulamasından aldığı gerçek antrenman verisi aşağıda verilmiştir.
-
-ANTRENMAN VERİSİ:
-${logText}
-
-KULLANICI SORUSU: ${question}
-
-Talimatlar:
-- Türkçe yanıt ver.
-- Sayısal verilerden tablo veya liste oluşturduğunda Markdown formatını kullan (| başlıklı tablo, **kalın** önemli değerler).
-- Gerçek sayılara dayan, yorum yaparken veriye sadık kal.
-- Eğer veri yetersizse bunu belirt ama elimdekilerle analiz yap.
-- Maksimum 600 kelime.`;
-
-  try {
-    const data = await callGemini([{ parts: [{ text: prompt }] }]);
-    if (data.error) throw new Error(data.error.message);
-    const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Yanıt alınamadı.';
-    const html = _markdownToHTML(raw);
-
-    body.innerHTML = `
-      <div style="margin-bottom:12px;font-size:12px;color:var(--text3);background:var(--surface2);border-radius:8px;padding:8px 12px">
-        🤖 <em>"${question.slice(0,70)}${question.length>70?'…':''}"</em>
-      </div>
-      <div class="ai-result-wrap">
-        <div class="ai-result-text">${html}</div>
-      </div>
-      <div style="display:flex;gap:8px;margin-top:16px">
-        <button class="btn btn-ghost" style="flex:1;font-size:13px" onclick="openAILogModal()">← Geri</button>
-        <button class="btn btn-ghost" style="flex:1;font-size:13px" onclick="copyAIResult()">📋 Kopyala</button>
-      </div>
-    `;
-    // store for copy
-    window._lastAIResult = raw;
-  } catch(err) {
-    body.innerHTML = `
-      <div style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:10px;padding:14px;margin-bottom:16px;font-size:13px;color:var(--danger)">
-        ❌ Hata: ${err.message || 'API yanıt vermedi'}
-      </div>
-      <button class="btn btn-ghost btn-full" onclick="openAILogModal()">← Geri dön</button>
-    `;
-  }
-}
-
-function copyAIResult() {
-  const text = window._lastAIResult || '';
-  if (!text) return;
-  navigator.clipboard?.writeText(text).then(()=>showToast('📋 Kopyalandı')).catch(()=>showToast('Kopyalanamadı',true));
-}
-
-function exportSingleLogCSV(logId) {
-  const log = ST.workoutLogs.find(l=>l.id===logId); if(!log) return;
-  const allEx = getAllExercises();
-  const dateStr = new Date(log.date).toLocaleDateString('tr-TR');
-  const dayName = translateDayName(log.dayName||'Workout');
-  const rows = [['Tarih','Gün','Egzersiz','Kas Grubu','Set No','Isınma?','Ağırlık (kg)','Tekrar','Hacim (kg)','Not']];
-  for (const ex of (log.exercises||[])) {
-    if (ex.skipped) continue;
-    const exData = allEx.find(e=>e.id===ex.exId)||{name:ex.exId,muscle:''};
-    let setNo = 0;
-    for (const s of (ex.sets||[])) {
-      if (!s.isWarmup) setNo++;
-      rows.push([
-        dateStr, dayName, exData.name, exData.muscle,
-        s.isWarmup ? 'ısınma' : setNo,
-        s.isWarmup ? 'Evet' : 'Hayır',
-        s.weight||0, s.reps||0, (s.weight||0)*(s.reps||0),
-        (s.note||'').replace(/,/g,' ')
-      ]);
-    }
-  }
-  const csv = rows.map(r=>r.map(v=>`"${v}"`).join(',')).join('\n');
-  const blob = new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  const d = new Date(log.date).toISOString().slice(0,10);
-  a.href=url; a.download=`kaslog-seans-${d}.csv`; a.click();
-  URL.revokeObjectURL(url);
-  showToast('📊 CSV indirildi');
-}
-
-function _markdownToHTML(md) {
-  // Minimal markdown → HTML (tablo, bold, liste)
-  let html = md
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-    // Tables
-    .replace(/\|(.+)\|\n\|[-| :]+\|\n((?:\|.+\|\n?)+)/g, (_, header, rows) => {
-      const ths = header.split('|').filter(s=>s.trim()).map(h=>`<th>${h.trim()}</th>`).join('');
-      const trs = rows.trim().split('\n').map(row=>{
-        const tds = row.split('|').filter(s=>s.trim()).map(d=>`<td>${d.trim()}</td>`).join('');
-        return `<tr>${tds}</tr>`;
-      }).join('');
-      return `<table><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`;
-    })
-    // Bold
-    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
-    // Headers
-    .replace(/^### (.+)$/gm,'<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:17px;font-weight:700;margin:14px 0 6px;color:var(--text)">$1</div>')
-    .replace(/^## (.+)$/gm,'<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:19px;font-weight:700;margin:16px 0 6px;color:var(--accent)">$1</div>')
-    .replace(/^# (.+)$/gm,'<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:22px;font-weight:800;margin:16px 0 8px;color:var(--accent)">$1</div>')
-    // Bullets
-    .replace(/^[-•] (.+)$/gm,'<div style="padding:2px 0 2px 16px;position:relative"><span style="position:absolute;left:0;color:var(--accent)">•</span>$1</div>')
-    // Line breaks
-    .replace(/\n\n/g,'<br><br>')
-    .replace(/\n/g,'<br>');
-  return html;
 }
 
 function openImportModal(){
@@ -4189,6 +3836,13 @@ function renderBeslenme() {
       </div>
     </div>
 
+    ${!hasKey ? `
+    <div class="nut-no-key">
+      <div style="font-size:28px;margin-bottom:8px">🤖</div>
+      <div class="nut-no-key-text">Gemini AI ile besin analizi için API key gerekiyor.<br>Ayarlar → Gemini API Key'e gir.</div>
+      <button class="btn btn-primary" onclick="navTo('ayarlar')" style="width:100%">Ayarlara Git →</button>
+    </div>
+    ` : `
     <div class="nut-add-wrap">
       <input class="nut-add-input" id="nut-input" placeholder='Örn: "200gr tavuk göğsü", "1 kase gevrek 200ml süt"...' onkeydown="if(event.key===\'Enter\')addNutritionEntry()" autocomplete="off">
       <button class="nut-cam-btn${_nutSelectedPhotos.length>0?' has-photos':''}" id="nut-cam-btn" onclick="document.getElementById(\'nut-photo-input\').click()" title="Fotoğraftan analiz et">
@@ -4215,6 +3869,7 @@ function renderBeslenme() {
       <button class="nut-photo-cancel-btn" onclick="clearNutPhotos()">İptal</button>
     </div>
     ` : ''}
+    `}
 
     <div class="section-title" style="padding:0 20px;margin-bottom:12px">BUGÜNKÜ ÖĞÜNLER</div>
     <div class="nut-entry-list">
@@ -4296,6 +3951,10 @@ function clearNutPhotos() {
 
 async function sendNutPhotos() {
   if (!_nutSelectedPhotos.length) return;
+  if (!ST.settings.geminiKey) {
+    showToast('Gemini API key gerekli. Ayarlar → Gemini API Key.', true);
+    return;
+  }
   await handleNutPhotos(_nutSelectedPhotos.map(p => p.file));
   _nutSelectedPhotos = [];
   renderBeslenme();
@@ -4305,9 +3964,16 @@ async function sendNutPhotos() {
 async function handleNutPhotos(files) {
   if (!files.length) return;
 
+  if (!ST.settings.geminiKey) {
+    showToast('Gemini API key gerekli. Ayarlar → Gemini API Key.', true);
+    return;
+  }
+
+  // Kamera butonunu loading yap
   const camBtn = document.getElementById('nut-cam-btn');
   if (camBtn) camBtn.classList.add('loading');
 
+  // Dosyaları base64'e çevir
   async function toBase64(file) {
     return new Promise((res, rej) => {
       const r = new FileReader();
@@ -4338,7 +4004,12 @@ Kurallar:
 SADECE JSON:`
     };
 
-    const data = await callGemini([{ parts: [...imageParts, textPart] }]);
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${ST.settings.geminiModel||'gemini-2.5-flash'}:generateContent?key=${ST.settings.geminiKey}`,
+      { method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ contents: [{ parts: [...imageParts, textPart] }] }) }
+    );
+    const data = await resp.json();
     if (data.error) throw new Error(data.error.message);
 
     let raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
@@ -4376,6 +4047,11 @@ async function addNutritionEntry() {
   const input = document.getElementById('nut-input');
   const text  = input?.value?.trim();
   if (!text) return;
+
+  if (!ST.settings.geminiKey) {
+    showToast('Gemini API key gerekli. Ayarlar → Gemini API Key.', true);
+    return;
+  }
 
   // Hemen listede göster — pending durumda
   const pendingId = 'n_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
@@ -4415,7 +4091,12 @@ Kurallar:
 Giriş: "${text}"
 SADECE JSON:`;
 
-    const data = await callGemini([{ parts: [{ text: prompt }] }]);
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${ST.settings.geminiModel||'gemini-2.5-flash'}:generateContent?key=${ST.settings.geminiKey}`,
+      { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({contents:[{parts:[{text:prompt}]}]}) }
+    );
+    const data = await resp.json();
     if (data.error) throw new Error(data.error.message);
     let raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     raw = raw.replace(/```json|```/g,'').trim();
@@ -4471,7 +4152,17 @@ async function init(){
   const savedSettings=await DB.get('settings','main');
   if(savedSettings){ST.settings={...ST.settings,...savedSettings};delete ST.settings.id;}
 
-  // URL key artık kullanılmıyor — proxy ile güvenli erişim sağlanıyor
+  // URL'den API key yükleme — arkadaşlara link paylaşımı için
+  // Kullanım: kaslog.html?key=AIza...
+  const _urlParams = new URLSearchParams(window.location.search);
+  const _urlKey = _urlParams.get('key') || _urlParams.get('gkey');
+  if (_urlKey && _urlKey.trim()) {
+    if (!ST.settings.geminiKey) {
+      // Sadece kendi key'i yoksa URL'deki key'i uygula (kişisel key'i ezme)
+      ST.settings.geminiKey = _urlKey.trim();
+      ST.settings._keyFromUrl = true;
+    }
+  }
   ST.routines=await DB.getAll('routines');
   ST.workoutLogs=await DB.getAll('workoutLogs');
   ST.measurements=await DB.getAll('measurements');
