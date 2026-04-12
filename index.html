@@ -992,6 +992,26 @@ canvas{width:100%;height:100%;}
   </div>
 </div>
 
+<!-- Nutrition Day Detail Modal -->
+<div class="modal-backdrop" id="modal-nut-day">
+  <div class="modal-sheet" style="max-height:90vh">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <div class="modal-title" id="nut-day-title">Günlük Öğünler</div>
+      <button class="modal-close" onclick="closeModal('modal-nut-day')">✕</button>
+    </div>
+    <div class="modal-body" style="padding:0"><div id="nut-day-content"></div></div>
+  </div>
+</div>
+
+<!-- Nutrition Entry Edit Modal -->
+<div class="modal-backdrop center-dialog" id="modal-nut-edit">
+  <div class="dialog-box" style="max-width:360px;width:93%">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:800;margin-bottom:16px" id="nut-edit-title">Öğünü Düzenle</div>
+    <div id="nut-edit-content"></div>
+  </div>
+</div>
+
 <!-- AI Log Analiz Modal -->
 <div class="modal-backdrop" id="modal-ai-log">
   <div class="modal-sheet" style="max-height:92vh">
@@ -3916,7 +3936,8 @@ function renderBeslenmeStats(el) {
           const pctK = goals.kcal > 0 ? Math.min(100, Math.round(d.kcal/goals.kcal*100)) : 0;
           const pctP = goals.protein > 0 ? Math.min(100, Math.round(d.protein/goals.protein*100)) : 0;
           const isEmpty = d.kcal === 0;
-          return `<div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px${isEmpty?';opacity:0.38':''}">
+          const entryCount = ST.nutritionLogs.filter(e => e.date === d.key).length;
+          return `<div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px${isEmpty?';opacity:0.38':''};cursor:${isEmpty?'default':'pointer'};transition:background 0.15s" onclick="${isEmpty?'':'openNutDayDetail(\''+d.key+'\')'}" ${isEmpty?'':'onmousedown="this.style.background=\'var(--surface2)\'" onmouseup="this.style.background=\'\'"'}>
             <div style="text-align:center;width:36px;flex-shrink:0">
               <div style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700">${d.dayNum}</div>
               <div style="font-size:10px;color:var(--text3);font-weight:600">${d.label}</div>
@@ -3933,6 +3954,7 @@ function renderBeslenmeStats(el) {
               </div>
               <div style="height:4px;background:var(--surface3);border-radius:2px"><div style="height:100%;width:${pctP}%;background:${pctP>=100?'#f59e0b':pctP>=50?'#3b82f6':'var(--accent)'};border-radius:2px"></div></div>
             </div>
+            ${!isEmpty ? `<div style="color:var(--text3);flex-shrink:0;display:flex;align-items:center;gap:3px"><span style="font-size:10px">${entryCount}</span><svg viewBox="0 0 24 24" style="width:12px;height:12px;stroke:var(--text3);fill:none;stroke-width:2"><polyline points="9 18 15 12 9 6"/></svg></div>` : ''}
           </div>`;
         }).join('')}
       </div>
@@ -4119,6 +4141,9 @@ function isTodayWorkoutDay() {
 let _nutWorkoutMode = null; // null = auto-detect
 
 function renderBeslenme() {
+  // Kullanıcı yazıyorsa sıfırlanmasın
+  const savedInput = document.getElementById('nut-input')?.value || '';
+
   const el = document.getElementById('beslenme-content');
   const s = ST.settings;
   const hasKey = !!s.geminiKey?.trim();
@@ -4218,7 +4243,7 @@ function renderBeslenme() {
     </div>
 
     <div class="nut-add-wrap">
-      <input class="nut-add-input" id="nut-input" placeholder='Örn: "200gr tavuk göğsü", "1 kase gevrek 200ml süt"...' onkeydown="if(event.key===\'Enter\')addNutritionEntry()" autocomplete="off">
+      <input class="nut-add-input" id="nut-input" placeholder='Örn: "200gr tavuk göğsü" veya fotoğraf seçince açıklama ekle...' onkeydown="if(event.key===\'Enter\')addNutritionEntry()" autocomplete="off">
       <button class="nut-cam-btn${_nutSelectedPhotos.length>0?' has-photos':''}" id="nut-cam-btn" onclick="document.getElementById(\'nut-photo-input\').click()" title="Fotoğraftan analiz et">
         <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
       </button>
@@ -4238,7 +4263,7 @@ function renderBeslenme() {
     <div class="nut-photo-send-row">
       <button class="nut-photo-send-btn" onclick="sendNutPhotos()">
         <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-        ${_nutSelectedPhotos.length} Fotoğrafı Analiz Et
+        Analiz Et & Ekle
       </button>
       <button class="nut-photo-cancel-btn" onclick="clearNutPhotos()">İptal</button>
     </div>
@@ -4276,6 +4301,12 @@ function renderBeslenme() {
     </div>
     <div style="height:20px"></div>
   `;
+
+  // Input değerini geri yükle (AI analiz beklerken yazı sıfırlanmasın)
+  if (savedInput) {
+    const inputEl = document.getElementById('nut-input');
+    if (inputEl) { inputEl.value = savedInput; inputEl.setSelectionRange(savedInput.length, savedInput.length); }
+  }
 }
 
 function setNutDayType(isWorkout) {
@@ -4324,13 +4355,16 @@ function clearNutPhotos() {
 
 async function sendNutPhotos() {
   if (!_nutSelectedPhotos.length) return;
-  await handleNutPhotos(_nutSelectedPhotos.map(p => p.file));
+  const input = document.getElementById('nut-input');
+  const userText = input?.value?.trim() || '';
+  if (input) input.value = '';
+  await handleNutPhotos(_nutSelectedPhotos.map(p => p.file), userText);
   _nutSelectedPhotos = [];
   renderBeslenme();
 }
 
 // ---- Fotoğraftan beslenme analizi ----
-async function handleNutPhotos(files) {
+async function handleNutPhotos(files, userText = '') {
   if (!files.length) return;
 
   const camBtn = document.getElementById('nut-cam-btn');
@@ -4355,6 +4389,7 @@ async function handleNutPhotos(files) {
 Birden fazla fotoğraf varsa aynı ürünün farklı tarafları olabilir — hepsini birlikte değerlendir.
 ÖNCE beslenme etiketi var mı diye bak — varsa değerleri TAMAMEN ETİKETTEN oku, tahmin yapma.
 Etiket yoksa görsel içeriğe göre tahmin et.
+${userText ? `\nKullanıcı notu: "${userText}" — bu notu gramaj/porsiyon hesaplarken dikkate al.` : ''}
 
 Kurallar:
 1. SADECE JSON döndür. Markdown yok, açıklama yok.
@@ -4403,6 +4438,17 @@ SADECE JSON:`
 async function addNutritionEntry() {
   const input = document.getElementById('nut-input');
   const text  = input?.value?.trim();
+
+  // Fotoğraf seçiliyse: fotoğraf + yazı birlikte gönder
+  if (_nutSelectedPhotos.length > 0) {
+    const userText = text || '';
+    input.value = '';
+    await handleNutPhotos(_nutSelectedPhotos.map(p => p.file), userText);
+    _nutSelectedPhotos = [];
+    renderBeslenme();
+    return;
+  }
+
   if (!text) return;
 
   // Hemen listede göster — pending durumda
@@ -4489,6 +4535,141 @@ async function deleteNutritionEntry(id) {
   await DB.del('nutritionLogs', id);
   ST.nutritionLogs = ST.nutritionLogs.filter(e => e.id !== id);
   renderBeslenme();
+}
+
+// ---- Günlük Detay Modal (İstatistik sekmesinden) ----
+function openNutDayDetail(dateKey) {
+  const MONTHS = ['Oca','Şub','Mar','Nis','May','Haz','Tem','Ağu','Eyl','Eki','Kas','Ara'];
+  const DAY_NAMES = ['Paz','Pzt','Sal','Çar','Per','Cum','Cmt'];
+  const d = new Date(dateKey + 'T00:00:00');
+  const title = `${DAY_NAMES[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`;
+  document.getElementById('nut-day-title').textContent = '🍽️ ' + title;
+  renderNutDayContent(dateKey);
+  openModal('modal-nut-day');
+}
+
+function renderNutDayContent(dateKey) {
+  const entries = ST.nutritionLogs.filter(e => e.date === dateKey);
+  const el = document.getElementById('nut-day-content');
+  if (!entries.length) {
+    el.innerHTML = `<div style="text-align:center;padding:40px 20px;color:var(--text3)"><div style="font-size:36px;margin-bottom:10px">🥗</div><div style="font-size:14px">Bu gün için kayıt yok</div></div>`;
+    return;
+  }
+  const totKcal = Math.round(entries.reduce((a,e) => a+(e.calories||0), 0));
+  const totProt = Math.round(entries.reduce((a,e) => a+(e.protein||0), 0));
+  const totCarbs = Math.round(entries.reduce((a,e) => a+(e.carbs||0), 0));
+  const totFat = Math.round(entries.reduce((a,e) => a+(e.fat||0), 0));
+
+  el.innerHTML = `
+    <div style="padding:14px 20px;background:var(--surface2);border-bottom:1px solid var(--border);display:flex;gap:16px;justify-content:space-around">
+      <div style="text-align:center">
+        <div style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:800;color:var(--accent)">${totKcal}</div>
+        <div style="font-size:10px;color:var(--text2);font-weight:600">KCALORİ</div>
+      </div>
+      <div style="text-align:center">
+        <div style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:800;color:#3b82f6">${totProt}g</div>
+        <div style="font-size:10px;color:var(--text2);font-weight:600">PROTEİN</div>
+      </div>
+      <div style="text-align:center">
+        <div style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:800;color:var(--warning)">${totCarbs}g</div>
+        <div style="font-size:10px;color:var(--text2);font-weight:600">KARB</div>
+      </div>
+      <div style="text-align:center">
+        <div style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:800;color:var(--text2)">${totFat}g</div>
+        <div style="font-size:10px;color:var(--text2);font-weight:600">YAĞ</div>
+      </div>
+    </div>
+    <div style="padding:12px 16px 20px">
+      ${entries.map(e => `
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 14px;margin-bottom:8px;display:flex;align-items:center;gap:10px" data-nut-id="${e.id}">
+          <div style="font-size:22px;flex-shrink:0">${e.emoji||'🍽️'}</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${e.name}</div>
+            <div style="display:flex;gap:8px;margin-top:3px;flex-wrap:wrap">
+              <span style="font-size:11px;color:var(--text2)">⚡ ${Math.round(e.calories||0)} kcal</span>
+              <span style="font-size:11px;color:var(--text2)">🥩 ${Math.round(e.protein||0)}g</span>
+              <span style="font-size:11px;color:var(--text2)">🌾 ${Math.round(e.carbs||0)}g</span>
+              <span style="font-size:11px;color:var(--text2)">🧈 ${Math.round(e.fat||0)}g</span>
+            </div>
+          </div>
+          <div style="display:flex;gap:6px;flex-shrink:0">
+            <button onclick="openNutEntryEdit('${e.id}','${dateKey}')" style="width:32px;height:32px;border-radius:8px;background:var(--surface2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:var(--transition)" title="Düzenle">
+              <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:var(--text2);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            </button>
+            <button onclick="deleteNutDayEntry('${e.id}','${dateKey}')" style="width:32px;height:32px;border-radius:8px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:var(--transition)" title="Sil">
+              <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:var(--danger);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+            </button>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+async function deleteNutDayEntry(id, dateKey) {
+  await DB.del('nutritionLogs', id);
+  ST.nutritionLogs = ST.nutritionLogs.filter(e => e.id !== id);
+  renderNutDayContent(dateKey);
+  renderBeslenme();
+  if (ST.activeTab === 'istatistik') renderStatsInner();
+  showToast('Öğün silindi');
+}
+
+function openNutEntryEdit(id, dateKey) {
+  const e = ST.nutritionLogs.find(x => x.id === id);
+  if (!e) return;
+  document.getElementById('nut-edit-title').textContent = e.emoji + ' Öğünü Düzenle';
+  document.getElementById('nut-edit-content').innerHTML = `
+    <div class="form-group">
+      <label class="form-label">Ad</label>
+      <input class="form-input" id="ne-name" value="${e.name.replace(/"/g,'&quot;')}" style="font-size:14px">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Kalori (kcal)</label>
+        <input class="form-input" id="ne-kcal" type="number" inputmode="decimal" value="${Math.round(e.calories||0)}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Protein (g)</label>
+        <input class="form-input" id="ne-protein" type="number" inputmode="decimal" value="${+(e.protein||0).toFixed(1)}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Karb (g)</label>
+        <input class="form-input" id="ne-carbs" type="number" inputmode="decimal" value="${+(e.carbs||0).toFixed(1)}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Yağ (g)</label>
+        <input class="form-input" id="ne-fat" type="number" inputmode="decimal" value="${+(e.fat||0).toFixed(1)}">
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:4px">
+      <button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-nut-edit')">Vazgeç</button>
+      <button class="btn btn-primary" style="flex:1" onclick="saveNutEntry('${id}','${dateKey}')">Kaydet ✓</button>
+    </div>
+  `;
+  openModal('modal-nut-edit');
+}
+
+async function saveNutEntry(id, dateKey) {
+  const idx = ST.nutritionLogs.findIndex(x => x.id === id);
+  if (idx === -1) return;
+  const name = document.getElementById('ne-name')?.value?.trim();
+  if (!name) return;
+  const updated = {
+    ...ST.nutritionLogs[idx],
+    name,
+    calories: parseFloat(document.getElementById('ne-kcal')?.value) || 0,
+    protein:  parseFloat(document.getElementById('ne-protein')?.value) || 0,
+    carbs:    parseFloat(document.getElementById('ne-carbs')?.value) || 0,
+    fat:      parseFloat(document.getElementById('ne-fat')?.value) || 0,
+  };
+  ST.nutritionLogs[idx] = updated;
+  await DB.put('nutritionLogs', updated);
+  closeModal('modal-nut-edit');
+  renderNutDayContent(dateKey);
+  renderBeslenme();
+  if (ST.activeTab === 'istatistik') renderStatsInner();
+  showToast('Öğün güncellendi ✓');
 }
 
 // ============================================================
