@@ -563,6 +563,8 @@ canvas{width:100%;height:100%;}
 .nut-cam-btn svg{width:18px;height:18px;stroke:var(--text2);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;}
 .nut-cam-btn.has-photos{background:var(--accent-dim);border-color:var(--accent);}
 .nut-cam-btn.has-photos svg{stroke:var(--accent);}
+.nut-add-btn.has-photos{background:var(--success);}
+.nut-add-btn.has-photos svg{stroke:#fff;}
 .nut-entry-list{margin:0 20px;}
 .nut-entry{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 14px;margin-bottom:8px;display:flex;align-items:center;gap:10px;}
 .nut-entry-icon{font-size:22px;flex-shrink:0;}
@@ -1088,7 +1090,8 @@ async function callGemini(contents, model) {
   });
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({}));
-    throw new Error(err.error || `Proxy hatası (${resp.status})`);
+    const errMsg = typeof err.error === 'string' ? err.error : (err.error?.message || err.message || `Proxy hatası (${resp.status})`);
+    throw new Error(errMsg);
   }
   return resp.json();
 }
@@ -4244,11 +4247,15 @@ function renderBeslenme() {
 
     <div class="nut-add-wrap">
       <input class="nut-add-input" id="nut-input" placeholder='Örn: "200gr tavuk göğsü" veya fotoğraf seçince açıklama ekle...' onkeydown="if(event.key===\'Enter\')addNutritionEntry()" autocomplete="off">
-      <button class="nut-cam-btn${_nutSelectedPhotos.length>0?' has-photos':''}" id="nut-cam-btn" onclick="document.getElementById(\'nut-photo-input\').click()" title="Fotoğraftan analiz et">
-        <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-      </button>
+      ${_nutSelectedPhotos.length > 0
+        ? `<button class="nut-cam-btn" id="nut-cam-btn" onclick="clearNutPhotos()" title="Fotoğrafları temizle" style="background:rgba(239,68,68,0.15);border-color:rgba(239,68,68,0.4)"><svg viewBox="0 0 24 24" style="stroke:var(--danger)"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>`
+        : `<button class="nut-cam-btn" id="nut-cam-btn" onclick="document.getElementById(\'nut-photo-input\').click()" title="Fotoğraftan analiz et"><svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></button>`
+      }
       <button class="nut-add-btn" id="nut-add-btn" onclick="addNutritionEntry()">
-        <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        ${_nutSelectedPhotos.length > 0
+          ? `<svg viewBox="0 0 24 24"><path d="M22 2L11 13"/><path d="M22 2L15 22 11 13 2 9l20-7z"/></svg>`
+          : `<svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`
+        }
       </button>
     </div>
     ${_nutSelectedPhotos.length > 0 ? `
@@ -4259,13 +4266,6 @@ function renderBeslenme() {
           <button class="nut-photo-thumb-del" onclick="removeNutPhoto(${i})">✕</button>
         </div>
       `).join('')}
-    </div>
-    <div class="nut-photo-send-row">
-      <button class="nut-photo-send-btn" onclick="sendNutPhotos()">
-        <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-        Analiz Et & Ekle
-      </button>
-      <button class="nut-photo-cancel-btn" onclick="clearNutPhotos()">İptal</button>
     </div>
     ` : ''}
 
@@ -4367,8 +4367,8 @@ async function sendNutPhotos() {
 async function handleNutPhotos(files, userText = '') {
   if (!files.length) return;
 
-  const camBtn = document.getElementById('nut-cam-btn');
-  if (camBtn) camBtn.classList.add('loading');
+  const addBtn = document.getElementById('nut-add-btn');
+  if (addBtn) addBtn.classList.add('loading');
 
   async function toBase64(file) {
     return new Promise((res, rej) => {
@@ -4402,7 +4402,7 @@ SADECE JSON:`
     };
 
     const data = await callGemini([{ parts: [...imageParts, textPart] }]);
-    if (data.error) throw new Error(data.error.message);
+    if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
 
     let raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     raw = raw.replace(/```json|```/g, '').trim();
@@ -4431,7 +4431,7 @@ SADECE JSON:`
   } catch(err) {
     showToast('📷 Fotoğraf analiz hatası: ' + (err.message || 'API hatası'), true);
   } finally {
-    if (camBtn) camBtn.classList.remove('loading');
+    if (addBtn) addBtn.classList.remove('loading');
   }
 }
 
@@ -4490,7 +4490,7 @@ Giriş: "${text}"
 SADECE JSON:`;
 
     const data = await callGemini([{ parts: [{ text: prompt }] }]);
-    if (data.error) throw new Error(data.error.message);
+    if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
     let raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     raw = raw.replace(/```json|```/g,'').trim();
     const parsed = JSON.parse(raw);
