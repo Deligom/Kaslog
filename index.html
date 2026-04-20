@@ -175,8 +175,9 @@ input{border:none;outline:none;background:none;color:inherit;width:100%;}
 .set-dot{flex:1;height:5px;border-radius:3px;background:var(--surface3);transition:var(--transition);}
 .set-dot.done{background:var(--success);}
 .set-dot.current{background:var(--accent);}
-.wo-prev-hint{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:8px 12px;font-size:12px;color:var(--text2);margin-bottom:12px;display:flex;align-items:center;gap:8px;}
-.wo-prev-hint svg{width:13px;height:13px;flex-shrink:0;}
+.wo-prev-hint{background:rgba(240,90,34,0.10);border:1.5px solid rgba(240,90,34,0.30);border-radius:10px;padding:10px 14px;font-size:13px;font-weight:600;color:var(--accent);margin-bottom:12px;display:flex;align-items:center;gap:8px;}
+.wo-prev-hint svg{width:14px;height:14px;flex-shrink:0;stroke:var(--accent);}
+.wo-prev-hint-label{font-size:10px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;color:var(--text3);margin-right:2px;}
 
 /* Compact inputs — bigger numbers, smaller chrome */
 .wo-inputs{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;}
@@ -574,6 +575,9 @@ canvas{width:100%;height:100%;}
 .nut-entry-macro{font-size:11px;color:var(--text2);}
 .nut-entry-kcal{font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:800;color:var(--accent);flex-shrink:0;}
 
+.nut-entry.error{border-color:rgba(239,68,68,0.35);background:rgba(239,68,68,0.05);}
+.nut-retry-btn{height:26px;padding:0 10px;border-radius:8px;font-size:11px;font-weight:700;background:rgba(239,68,68,0.12);color:var(--danger);border:1px solid rgba(239,68,68,0.25);cursor:pointer;white-space:nowrap;transition:var(--transition);flex-shrink:0;}
+.nut-retry-btn:active{transform:scale(0.94);background:rgba(239,68,68,0.22);}
 /* Queue / Pending entry */
 @keyframes pendingPulse{0%,100%{opacity:1;}50%{opacity:0.4;}}
 .nut-entry.pending{opacity:0.7;}
@@ -753,7 +757,7 @@ canvas{width:100%;height:100%;}
         <!-- Combined last + overload hint -->
         <div class="wo-prev-hint" id="wo-prev-hint" style="display:none">
           <svg viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
-          <span id="wo-prev-text">—</span>
+          <span><span class="wo-prev-hint-label">SON SEANS</span><span id="wo-prev-text">—</span></span>
           <span id="wo-overload-badge" style="display:none;margin-left:auto;font-size:11px;font-weight:700;color:var(--accent);white-space:nowrap"></span>
         </div>
         <div class="wo-inputs">
@@ -1090,7 +1094,16 @@ async function callGemini(contents, model) {
   });
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({}));
-    const errMsg = typeof err.error === 'string' ? err.error : (err.error?.message || err.message || `Proxy hatası (${resp.status})`);
+    let errMsg = typeof err.error === 'string' ? err.error : (err.error?.message || err.message || '');
+    // Proxy'den gelen İngilizce sistem mesajlarını Türkçeleştir
+    if (!errMsg || errMsg.includes('high demand') || errMsg.includes('overloaded') || resp.status === 503 || resp.status === 529)
+      errMsg = 'high demand'; // Üst katmanda yakalanacak
+    else if (resp.status === 429 || errMsg.includes('quota') || errMsg.includes('RESOURCE_EXHAUSTED'))
+      errMsg = 'quota exceeded';
+    else if (resp.status === 401 || resp.status === 403)
+      errMsg = 'API_KEY invalid';
+    else
+      errMsg = errMsg || `Proxy hatası (${resp.status})`;
     throw new Error(errMsg);
   }
   return resp.json();
@@ -2148,8 +2161,16 @@ function renderWoExercise(){
   if(warmupCount>0)dots+=`<div class="set-dot warmup" title="Isınma seti"></div>`.repeat(warmupCount);
   document.getElementById('wo-set-dots').innerHTML=dots;
   const pEl=document.getElementById('wo-prev-hint');
-  if(se.prevPerf){pEl.style.display='flex';document.getElementById('wo-prev-text').textContent=`${T('last_perf')} ${se.prevPerf.weight}kg × ${se.prevPerf.reps}${ex.type==='time'?'s':'rep'}`;}
-  else pEl.style.display='none';
+  if(se.prevPerf){
+    pEl.style.display='flex';
+    // Son antrenmandaki o egzersizin tüm set sayısını göster
+    const lastLog = ST.workoutLogs.slice().reverse().find(l=>l.exercises?.some(e=>e.exId===se.exId));
+    const lastExLog = lastLog?.exercises?.find(e=>e.exId===se.exId);
+    const workSets = (lastExLog?.sets||[]).filter(s=>!s.isWarmup&&s.weight>0);
+    let prevText = `${se.prevPerf.weight}kg × ${se.prevPerf.reps}${ex.type==='time'?'s':'rep'}`;
+    if(workSets.length>1) prevText += ` (${workSets.length} set)`;
+    document.getElementById('wo-prev-text').textContent = prevText;
+  } else pEl.style.display='none';
   // Progressive overload badge
   const sug=getProgressiveOverloadSuggestion(se.exId);
   const badge=document.getElementById('wo-overload-badge');
@@ -2565,7 +2586,18 @@ const SFX = (() => {
 })();
 
 function getLastPerformance(exId){
-  for(let i=ST.workoutLogs.length-1;i>=0;i--){const log=ST.workoutLogs[i];const ex=log.exercises?.find(e=>e.exId===exId);if(ex&&ex.sets?.length){return ex.sets[ex.sets.length-1];}}return null;
+  for(let i=ST.workoutLogs.length-1;i>=0;i--){
+    const log=ST.workoutLogs[i];
+    const ex=log.exercises?.find(e=>e.exId===exId);
+    if(ex&&ex.sets?.length){
+      // Warmup olmayan son work set'i döndür
+      const workSets=ex.sets.filter(s=>!s.isWarmup&&s.weight>0);
+      if(workSets.length) return workSets[workSets.length-1];
+      // Sadece warmup varsa da göster
+      return ex.sets[ex.sets.length-1];
+    }
+  }
+  return null;
 }
 function getPersonalRecord(exId){
   // Önce kayıtlı PR'a bak (date bilgisi var)
@@ -3458,8 +3490,13 @@ async function handleImportFile(input){
 // ============================================================
 function showToast(msg,isError=false){
   const t=document.getElementById('toast-el');
-  t.textContent=msg; t.style.background=isError?'var(--danger)':'var(--success)';
-  t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2800);
+  t.textContent=msg;
+  t.style.background=isError?'var(--danger)':'var(--success)';
+  t.style.whiteSpace=isError?'normal':'nowrap';
+  t.style.maxWidth=isError?'88vw':'none';
+  t.style.textAlign=isError?'center':'left';
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), isError?4200:2800);
 }
 
 async function setLang(lang) {
@@ -4278,7 +4315,9 @@ function renderBeslenme() {
         </div>
       ` : entries.map(e => {
         const macroHTML = e.pending
-          ? '<span class="nut-entry-macro" style="color:var(--text3);font-style:italic">Hesaplanıyor...</span>'
+          ? '<span class="nut-entry-macro" style="color:var(--text3);font-style:italic">⏳ AI analiz ediyor...</span>'
+          : e.error
+          ? '<span class="nut-entry-macro" style="color:var(--danger)">⚠️ Analiz başarısız — tekrar dene</span>'
           : '<span class="nut-entry-macro">\u{1F969} ' + Math.round(e.protein||0) + 'g protein</span>' +
             '<span class="nut-entry-macro">\u{1F33E} ' + Math.round(e.carbs||0) + 'g karb</span>' +
             '<span class="nut-entry-macro">\u{1F9C8} ' + Math.round(e.fat||0) + 'g yağ</span>';
@@ -4286,13 +4325,16 @@ function renderBeslenme() {
           ? '<span class="nut-entry-queue-dot"></span>' + e.name
           : e.name;
         return `
-        <div class="nut-entry${e.pending ? ' pending' : ''}">
+        <div class="nut-entry${e.pending ? ' pending' : ''}${e.error ? ' error' : ''}">
           <div class="nut-entry-icon">${e.pending ? '\u23F3' : (e.emoji||'\u{1F37D}')}</div>
           <div class="nut-entry-info">
             <div class="nut-entry-name">${nameHTML}</div>
             <div class="nut-entry-macros">${macroHTML}</div>
           </div>
-          <div class="nut-entry-kcal">${e.pending ? '—' : Math.round(e.calories||0)}</div>
+          ${e.error
+            ? `<button class="nut-retry-btn" onclick="retryNutritionEntry('${e.id}')">🔄 Tekrar</button>`
+            : `<div class="nut-entry-kcal">${e.pending ? '—' : Math.round(e.calories||0)}</div>`
+          }
           <button class="nut-del-btn" onclick="deleteNutritionEntry('${e.id}')">
             <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
           </button>
@@ -4429,7 +4471,17 @@ SADECE JSON:`
     renderBeslenme();
     showToast(`${sourceIcon} ${parsed.source === 'label' ? 'Etiket okundu' : 'AI tahmini'}: ${entry.name}`);
   } catch(err) {
-    showToast('📷 Fotoğraf analiz hatası: ' + (err.message || 'API hatası'), true);
+    const raw = err.message || '';
+    let photoErrMsg;
+    if (raw.includes('high demand') || raw.includes('503') || raw.includes('529'))
+      photoErrMsg = '⏳ Sunucu yoğun, biraz sonra tekrar dene';
+    else if (raw.includes('quota') || raw.includes('429'))
+      photoErrMsg = '🚦 Kota doldu, biraz bekle';
+    else if (raw.includes('network') || raw.includes('Failed'))
+      photoErrMsg = '📡 Bağlantı hatası — interneti kontrol et';
+    else
+      photoErrMsg = '📷 Fotoğraf analiz hatası — tekrar dene';
+    showToast(photoErrMsg, true);
   } finally {
     if (addBtn) addBtn.classList.remove('loading');
   }
@@ -4521,7 +4573,20 @@ SADECE JSON:`;
       ST.nutritionLogs[idx] = errEntry;
       await DB.put('nutritionLogs', errEntry);
     }
-    showToast('Hata: ' + (err.message||'API hatası'), true);
+    // Kullanıcı dostu hata mesajı
+    const raw = err.message || '';
+    let friendlyMsg;
+    if (raw.includes('high demand') || raw.includes('overloaded') || raw.includes('503') || raw.includes('529'))
+      friendlyMsg = '⏳ Sunucu yoğun, biraz sonra 🔄 tekrar dene';
+    else if (raw.includes('quota') || raw.includes('429') || raw.includes('RESOURCE_EXHAUSTED'))
+      friendlyMsg = '🚦 Kota doldu, biraz bekle ve tekrar dene';
+    else if (raw.includes('network') || raw.includes('fetch') || raw.includes('Failed'))
+      friendlyMsg = '📡 Bağlantı hatası — internet bağlantını kontrol et';
+    else if (raw.includes('401') || raw.includes('403') || raw.includes('API_KEY'))
+      friendlyMsg = '🔑 API anahtarı hatası — Ayarlar\'dan kontrol et';
+    else
+      friendlyMsg = '❌ AI analiz başarısız — 🔄 butona bas tekrar dene';
+    showToast(friendlyMsg, true);
   }
 
   renderBeslenme();
@@ -4530,6 +4595,23 @@ SADECE JSON:`;
   _processNutQueue();
 }
 
+
+async function retryNutritionEntry(id) {
+  const idx = ST.nutritionLogs.findIndex(e => e.id === id);
+  if (idx === -1) return;
+  const entry = ST.nutritionLogs[idx];
+  const text = entry.raw || entry.name;
+  if (!text) return;
+  // Pending'e döndür
+  const retried = { ...entry, emoji: '⏳', pending: true, error: false };
+  ST.nutritionLogs[idx] = retried;
+  await DB.put('nutritionLogs', retried);
+  renderBeslenme();
+  showToast('🔄 Tekrar deneniyor...');
+  // Kuyruğa ekle
+  _nutQueue.push({ text, pendingId: id });
+  if (!_nutQueueProcessing) _processNutQueue();
+}
 
 async function deleteNutritionEntry(id) {
   await DB.del('nutritionLogs', id);
