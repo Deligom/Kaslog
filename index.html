@@ -1116,10 +1116,10 @@ const DB = (() => {
   let db;
   function open() {
     return new Promise((res,rej) => {
-      const req = indexedDB.open('KaslogDB2',2);
+      const req = indexedDB.open('KaslogDB2',3);
       req.onupgradeneeded = e => {
         const d = e.target.result;
-        ['settings','routines','workoutLogs','measurements','customExercises','prs','nutritionLogs'].forEach(s => {
+        ['settings','routines','workoutLogs','measurements','customExercises','prs','nutritionLogs','foodDb'].forEach(s => {
           if (!d.objectStoreNames.contains(s)) d.createObjectStore(s,{keyPath:'id'});
         });
       };
@@ -2109,7 +2109,7 @@ function startWorkout(routineId,dayId) {
   if(!allExs.length){showConfirm('💪',translateDayName(day.name),T('day_empty'),()=>{closeModal('modal-alert');navTo('program');});return;}
   ST.workout={
     routineId,dayId,dayName:day.name,
-    exercises:allExs.map(de=>{const ex=getExercise(de.exId);return{exId:de.exId,exData:ex,totalSets:de.sets,targetReps:de.reps,completedSets:[],skipped:de.disabled,prevPerf:getLastPerformance(de.exId)};}).filter(e=>e.exData),
+    exercises:allExs.map(de=>{const ex=getExercise(de.exId);return{exId:de.exId,exData:ex,totalSets:de.sets,targetReps:de.reps,completedSets:[],skipped:de.disabled,prevPerf:getLastPerformance(de.exId),prevSets:getLastSetsPerformance(de.exId)};}).filter(e=>e.exData),
     exIndex:0,setIndex:0,startTime:Date.now(),phase:'exercise'
   };
   woStartTime=Date.now();
@@ -2167,21 +2167,30 @@ function renderWoExercise(){
     const lastLog = ST.workoutLogs.slice().reverse().find(l=>l.exercises?.some(e=>e.exId===se.exId));
     const lastExLog = lastLog?.exercises?.find(e=>e.exId===se.exId);
     const workSets = (lastExLog?.sets||[]).filter(s=>!s.isWarmup&&s.weight>0);
-    let prevText = `${se.prevPerf.weight}kg × ${se.prevPerf.reps}${ex.type==='time'?'s':'rep'}`;
+    // Başlıkta en iyi seti (en ağır, eşitse en çok tekrar) göster — son/zayıf seti değil.
+    const topSet = workSets.length
+      ? workSets.reduce((b,s)=>(s.weight>b.weight||(s.weight===b.weight&&s.reps>b.reps))?s:b)
+      : se.prevPerf;
+    let prevText = `${topSet.weight}kg × ${topSet.reps}${ex.type==='time'?'s':'rep'}`;
     if(workSets.length>1) prevText += ` (${workSets.length} set)`;
     document.getElementById('wo-prev-text').textContent = prevText;
   } else pEl.style.display='none';
   // Progressive overload badge
-  const sug=getProgressiveOverloadSuggestion(se.exId);
+  const sug=getProgressiveOverloadSuggestion(se.exId, se.targetReps);
   const badge=document.getElementById('wo-overload-badge');
   if(badge){
-    if(sug){badge.style.display='inline';badge.textContent=sug.type==='increase'?`🔼 ${sug.suggestedWeight}kg dene`:`= ${sug.suggestedWeight}kg`;}
+    if(sug){badge.style.display='inline';badge.textContent=sug.type==='increase'?`🔼 ${sug.suggestedWeight}kg dene`:`${sug.workW}kg · ${sug.target} tekrar hedefle`;}
     else badge.style.display='none';
   }
   const last=se.completedSets[se.completedSets.length-1];
-  let prefillWeight=last?.weight??(sug?.type==='increase'?sug.suggestedWeight:(se.prevPerf?.weight??0));
+  // Şu an girilecek setin sırası (0 tabanlı). Geçen antrenmanın AYNI sıradaki setini referans al.
+  const setIdx=se.completedSets.length;
+  const prevSet=(se.prevSets&&se.prevSets.length)
+    ? (se.prevSets[setIdx]??se.prevSets[se.prevSets.length-1])
+    : se.prevPerf;
+  let prefillWeight=last?.weight??(sug?.type==='increase'?sug.suggestedWeight:(prevSet?.weight??0));
   document.getElementById('wo-weight').value=prefillWeight;
-  document.getElementById('wo-reps').value=last?.reps??(se.prevPerf?.reps??se.targetReps);
+  document.getElementById('wo-reps').value=last?.reps??(prevSet?.reps??se.targetReps);
   // i18n labels
   const rl=document.getElementById('wo-reps-label'), ru=document.getElementById('wo-reps-unit');
   const wl=document.getElementById('wo-weight-label');
@@ -2595,6 +2604,20 @@ function getLastPerformance(exId){
       if(workSets.length) return workSets[workSets.length-1];
       // Sadece warmup varsa da göster
       return ex.sets[ex.sets.length-1];
+    }
+  }
+  return null;
+}
+// Önceki antrenmanın o egzersizdeki TÜM work setlerini (sırasıyla) döndürür.
+// Böylece yeni antrenmanda 1. set -> geçen seferki 1. set ile eşleşir.
+function getLastSetsPerformance(exId){
+  for(let i=ST.workoutLogs.length-1;i>=0;i--){
+    const log=ST.workoutLogs[i];
+    const ex=log.exercises?.find(e=>e.exId===exId);
+    if(ex&&ex.sets?.length){
+      const workSets=ex.sets.filter(s=>!s.isWarmup&&s.weight>0);
+      if(workSets.length) return workSets;
+      return ex.sets;
     }
   }
   return null;
@@ -3611,8 +3634,32 @@ function toggleTipWrap() {
   if (btn) btn.classList.toggle('open', isOpen);
 }
 
-// FIX: If same weight repeated across 2+ sessions → increase. Simple & reliable.
-function getProgressiveOverloadSuggestion(exId) {
+// Çift ilerleme (double progression): çalışma ağırlığında ÜST setinde hedef
+// tekrarı tutturduysan → kiloyu artır. Tutturamadıysan (yorgun gün dahil) →
+// aynı kiloda kal, tekrarı büyütmeye çalış. Tek kötü gün seni asla geriletmez.
+function getProgressiveOverloadSuggestion(exId, targetReps) {
+  // Son antrenmandaki bu egzersizin work setlerini bul
+  let lastSets = null;
+  for (let i = ST.workoutLogs.length - 1; i >= 0; i--) {
+    const ex = ST.workoutLogs[i].exercises?.find(e => e.exId === exId);
+    if (ex) {
+      const ws = (ex.sets || []).filter(s => !s.isWarmup && s.weight > 0);
+      if (ws.length) { lastSets = ws; break; }
+    }
+  }
+  if (!lastSets) return null;
+  const workW = Math.max(...lastSets.map(s => s.weight));   // çalışma ağırlığı
+  const setsAtW = lastSets.filter(s => s.weight === workW);
+  const topReps = Math.max(...setsAtW.map(s => s.reps));     // o kilodaki en iyi set
+  const target = targetReps || 10;
+  if (topReps >= target) {
+    // Hedefi tutturdun → küçük bir kilo artışı öner
+    return { type: 'increase', suggestedWeight: +(workW + 0.5).toFixed(1), workW, target };
+  }
+  // Tutturamadın → aynı kiloda kal, tekrarı hedefe taşı
+  return { type: 'maintain', suggestedWeight: workW, workW, target, topReps };
+}
+function _oldOverload_unused(exId) {
   const perfs = [];
   for (let i = ST.workoutLogs.length - 1; i >= 0 && perfs.length < 3; i--) {
     const log = ST.workoutLogs[i];
@@ -4422,6 +4469,34 @@ async function handleNutPhotos(files, userText = '') {
   }
 
   try {
+    // ---- KADEME A: Barkod tara → Open Food Facts (kesin veri) ----
+    const barcode = await _detectBarcode(files);
+    if (barcode) {
+      const food = await _lookupOFFByBarcode(barcode);
+      if (food) {
+        await _learnFood(food); // öğren
+        const { qty, grams } = _parseFoodText(userText || '1');
+        const mac = _foodToMacros(food, qty, grams);
+        const entry = {
+          id: 'n_' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
+          date: todayDateKey(),
+          name: food.name + (qty !== 1 ? ' ×' + qty : ''),
+          calories: mac.calories, protein: mac.protein, carbs: mac.carbs, fat: mac.fat,
+          emoji: '📦', pending: false, fromPhoto: true,
+          portionNote: mac.portionNote, matchSource: 'barcode',
+          createdAt: Date.now(),
+        };
+        await DB.put('nutritionLogs', entry);
+        ST.nutritionLogs.push(entry);
+        renderBeslenme();
+        showToast('📦 Barkod eşleşti: ' + food.name);
+        if (addBtn) addBtn.classList.remove('loading');
+        return;
+      }
+      // Barkod okundu ama OFF'ta yok → Gemini'ye düş (etiket okuyabilir)
+    }
+
+    // ---- KADEME B: Gemini görsel tanıma / etiket okuma ----
     const imageParts = await Promise.all(files.map(async f => ({
       inline_data: { mime_type: f.type || 'image/jpeg', data: await toBase64(f) }
     })));
@@ -4435,11 +4510,14 @@ ${userText ? `\nKullanıcı notu: "${userText}" — bu notu gramaj/porsiyon hesa
 
 Kurallar:
 1. SADECE JSON döndür. Markdown yok, açıklama yok.
-2. Şema: {"name":"string","totalKcal":number,"totalProtein":number,"totalCarbs":number,"totalFat":number,"emoji":"string","source":"label|estimate","portionNote":"string"}
+2. Şema: {"name":"string","totalKcal":number,"totalProtein":number,"totalCarbs":number,"totalFat":number,"emoji":"string","source":"label|estimate","portionNote":"string","productQuery":"string|null","per100":{"kcal":number,"protein":number,"carbs":number,"fat":number}|null,"packageG":number|null}
 3. name: Türkçe ürün adı. Gramaj/paket bilgisi varsa ekle (örn: "Dido Gofret Bar (47g)").
 4. Değerler TAM PAKET / GÖRÜNEN PORSİYON için — 100g baz değil.
 5. source: "label" etiket okuduysan, "estimate" tahmin ettiysen.
 6. portionNote: kısa not, örn "47g paket değerleri" veya "1 dilim tahmin".
+7. productQuery: paketli/markalı ürünse arama sorgusu (örn "Ülker Çikolatalı Gofret"), ev yemeği/tabaksa null.
+8. per100: etiketi okuduysan 100g başına değerler, okuyamadıysan null.
+9. packageG: paket gramajı görünüyorsa sayı, yoksa null.
 SADECE JSON:`
     };
 
@@ -4449,6 +4527,43 @@ SADECE JSON:`
     let raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     raw = raw.replace(/```json|```/g, '').trim();
     const parsed = JSON.parse(raw);
+
+    // ---- KADEME C: Markalı ürün tanındıysa önce lokal/OFF'tan KESİN veri dene ----
+    if (parsed.productQuery && parsed.source !== 'label') {
+      const q = (userText ? userText + ' ' : '') + parsed.productQuery;
+      const resolved = await _cascadeResolveText(q);
+      if (resolved) {
+        const entry = {
+          id: 'n_' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
+          date: todayDateKey(),
+          name: resolved.name,
+          calories: resolved.calories, protein: resolved.protein,
+          carbs: resolved.carbs, fat: resolved.fat,
+          emoji: resolved.emoji, pending: false, fromPhoto: true,
+          portionNote: resolved.portionNote, matchSource: resolved.matchSource,
+          createdAt: Date.now(),
+        };
+        await DB.put('nutritionLogs', entry);
+        ST.nutritionLogs.push(entry);
+        renderBeslenme();
+        showToast((resolved.matchSource==='local'?'📗':'🌐') + ' Ürün tanındı: ' + resolved.name);
+        if (addBtn) addBtn.classList.remove('loading');
+        return;
+      }
+    }
+
+    // ---- Etiket okunduysa ürünü ÖĞREN (bir daha sorulmaz) ----
+    if (parsed.source === 'label' && parsed.per100?.kcal && parsed.productQuery) {
+      await _learnFood({
+        id: 'food_' + _foodNorm(parsed.productQuery).replace(/ /g,'_'),
+        name: parsed.productQuery, norm: _foodNorm(parsed.productQuery),
+        barcode: null,
+        per100: { kcal: Math.round(parsed.per100.kcal), protein: +(parsed.per100.protein||0),
+                  carbs: +(parsed.per100.carbs||0), fat: +(parsed.per100.fat||0) },
+        servingG: parsed.packageG || null,
+        source: 'label', addedAt: Date.now()
+      });
+    }
 
     const sourceIcon = parsed.source === 'label' ? '🏷️' : '🤖';
     const pendingId = 'n_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
@@ -4485,6 +4600,156 @@ SADECE JSON:`
   } finally {
     if (addBtn) addBtn.classList.remove('loading');
   }
+}
+
+// ============================================================
+// KADEMELİ BESİN EŞLEŞTİRME (Cascade)
+// Metin:    Lokal DB → Open Food Facts → Gemini (tahmin)
+// Fotoğraf: Barkod → OFF | Gemini görsel tanıma → metin akışı
+// Her başarılı eşleşme lokal DB'ye kaydedilir → sistem öğrenir.
+// ============================================================
+
+// Türkçe-duyarlı normalizasyon (İ/ı sorunu dahil)
+function _foodNorm(s){
+  return (s||'').toLocaleLowerCase('tr-TR')
+    .replace(/[çÇ]/g,'c').replace(/[ğĞ]/g,'g').replace(/[ıİiI]/g,'i')
+    .replace(/[öÖ]/g,'o').replace(/[şŞ]/g,'s').replace(/[üÜ]/g,'u')
+    .replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
+}
+
+// "2 adet ülker gofret", "150g pilav", "yarım ekmek" → {qty, grams, product}
+function _parseFoodText(text){
+  let t=text.trim(), qty=1, grams=null;
+  const g=t.match(/(\d+(?:[.,]\d+)?)\s*(?:g|gr|gram)\b/i);
+  if(g) grams=parseFloat(g[1].replace(',','.'));
+  const m=t.match(/^(\d+(?:[.,]\d+)?)\s*(?:x|adet|tane|paket|porsiyon|dilim|kase|bardak)?\s+(.+)/i);
+  if(m && !t.match(/^\d+\s*(?:g|gr|gram)\b/i)){ qty=parseFloat(m[1].replace(',','.')); t=m[2]; }
+  if(/^yar[ıi]m\s+/i.test(t)){ qty=0.5; t=t.replace(/^yar[ıi]m\s+/i,''); }
+  // gramaj metni ürün adından temizle
+  t=t.replace(/\d+(?:[.,]\d+)?\s*(?:g|gr|gram)\b/i,'').trim();
+  return { qty, grams, product:t };
+}
+
+// 1. KADEME: Lokal foodDb'de ara (öğrenilmiş ürünler). Basit skorlu eşleşme.
+function _lookupLocalFood(query){
+  const q=_foodNorm(query); if(!q||!ST.foodDb?.length) return null;
+  const qWords=q.split(' ');
+  let best=null,bestScore=0;
+  for(const f of ST.foodDb){
+    const n=f.norm||_foodNorm(f.name);
+    if(n===q) return f; // tam eşleşme
+    let score=0;
+    for(const w of qWords) if(w.length>1&&n.includes(w)) score++;
+    score=score/qWords.length;
+    if(score>bestScore){bestScore=score;best=f;}
+  }
+  return bestScore>=0.75?best:null; // kelimelerin ≥%75'i eşleşmeli
+}
+
+// 2. KADEME: Open Food Facts isimle ara (TR öncelikli)
+async function _lookupOFFByName(query){
+  try{
+    const url='https://tr.openfoodfacts.org/cgi/search.pl?search_terms='+encodeURIComponent(query)
+      +'&search_simple=1&action=process&json=1&page_size=5&fields=product_name,brands,nutriments,serving_quantity,code';
+    const r=await fetch(url,{signal:AbortSignal.timeout(6000)});
+    if(!r.ok) return null;
+    const d=await r.json();
+    const qN=_foodNorm(query);
+    for(const p of (d.products||[])){
+      const nu=p.nutriments||{};
+      if(!nu['energy-kcal_100g']&&!nu['energy-kcal']) continue;
+      const name=((p.brands?p.brands.split(',')[0]+' ':'')+(p.product_name||'')).trim();
+      if(!name) continue;
+      // İsim alakasız çıkarsa alma (en az 1 kelime örtüşsün)
+      const nN=_foodNorm(name);
+      if(!qN.split(' ').some(w=>w.length>1&&nN.includes(w))) continue;
+      return _offToFood(p,name);
+    }
+    return null;
+  }catch{return null;}
+}
+
+// Barkodla OFF sorgusu (fotoğraf akışı)
+async function _lookupOFFByBarcode(code){
+  try{
+    const r=await fetch('https://world.openfoodfacts.org/api/v2/product/'+code
+      +'.json?fields=product_name,brands,nutriments,serving_quantity,code',{signal:AbortSignal.timeout(6000)});
+    if(!r.ok) return null;
+    const d=await r.json();
+    if(d.status!==1||!d.product) return null;
+    const p=d.product;
+    const name=((p.brands?p.brands.split(',')[0]+' ':'')+(p.product_name||'Ürün')).trim();
+    return _offToFood(p,name);
+  }catch{return null;}
+}
+
+function _offToFood(p,name){
+  const nu=p.nutriments||{};
+  const k=(a,b)=>nu[a]??nu[b]??0;
+  return {
+    id:'food_'+(p.code||_foodNorm(name).replace(/ /g,'_')),
+    name, norm:_foodNorm(name), barcode:p.code||null,
+    per100:{kcal:Math.round(k('energy-kcal_100g','energy-kcal')),
+            protein:+(k('proteins_100g','proteins')||0),
+            carbs:+(k('carbohydrates_100g','carbohydrates')||0),
+            fat:+(k('fat_100g','fat')||0)},
+    servingG:parseFloat(p.serving_quantity)||null,
+    source:'off', addedAt:Date.now()
+  };
+}
+
+// Öğren: ürünü lokal DB'ye kaydet (varsa güncelle)
+async function _learnFood(food){
+  if(!food?.per100?.kcal) return;
+  const ex=ST.foodDb.findIndex(f=>f.id===food.id);
+  if(ex!==-1) ST.foodDb[ex]=food; else ST.foodDb.push(food);
+  await DB.put('foodDb',food);
+}
+
+// food + miktar → girişe yazılacak makrolar
+function _foodToMacros(food,qty,grams){
+  const p=food.per100;
+  let factor, note;
+  if(grams){ factor=grams/100; note=grams+'g'; }
+  else if(food.servingG){ factor=(food.servingG*qty)/100; note=qty+'\u00d7 '+food.servingG+'g'; }
+  else { factor=qty; note=qty+'\u00d7 100g'; } // porsiyon bilinmiyorsa 100g varsay
+  return {
+    calories:Math.round(p.kcal*factor),
+    protein:Math.round(p.protein*factor*10)/10,
+    carbs:Math.round(p.carbs*factor*10)/10,
+    fat:Math.round(p.fat*factor*10)/10,
+    portionNote:note
+  };
+}
+
+// Kademeli metin çözümleme. Başarıda entry alanları döner, null → Gemini'ye düş.
+async function _cascadeResolveText(text){
+  const {qty,grams,product}=_parseFoodText(text);
+  if(!product) return null;
+  // 1) Lokal (öğrenilmiş ürünler)
+  let food=_lookupLocalFood(product);
+  if(food) return {..._foodToMacros(food,qty,grams),name:food.name+(qty!==1?' \u00d7'+qty:''),emoji:'\ud83d\udcd7',matchSource:'local'};
+  // 2) Open Food Facts
+  food=await _lookupOFFByName(product);
+  if(food){ await _learnFood(food); // öğren → bir dahakine lokalden gelir
+    return {..._foodToMacros(food,qty,grams),name:food.name+(qty!==1?' \u00d7'+qty:''),emoji:'\ud83c\udf10',matchSource:'off'};
+  }
+  return null; // 3) Gemini tahminine düşecek
+}
+
+// Fotoğraflarda barkod ara (Android Chrome: native BarcodeDetector)
+async function _detectBarcode(files){
+  if(!('BarcodeDetector' in window)) return null;
+  try{
+    const det=new BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e','code_128']});
+    for(const f of files){
+      const bmp=await createImageBitmap(f);
+      const codes=await det.detect(bmp);
+      bmp.close?.();
+      if(codes.length) return codes[0].rawValue;
+    }
+  }catch{}
+  return null;
 }
 
 async function addNutritionEntry() {
@@ -4531,6 +4796,29 @@ async function _processNutQueue() {
   const { text, pendingId } = _nutQueue.shift();
 
   try {
+    // ---- KADEME 1-2: Lokal DB → Open Food Facts (sıfır AI hatası) ----
+    const resolved = await _cascadeResolveText(text);
+    if (resolved) {
+      const idx = ST.nutritionLogs.findIndex(e => e.id === pendingId);
+      if (idx !== -1) {
+        const updated = {
+          ...ST.nutritionLogs[idx],
+          name: resolved.name, calories: resolved.calories,
+          protein: resolved.protein, carbs: resolved.carbs, fat: resolved.fat,
+          emoji: resolved.emoji, portionNote: resolved.portionNote,
+          matchSource: resolved.matchSource, pending: false,
+        };
+        ST.nutritionLogs[idx] = updated;
+        await DB.put('nutritionLogs', updated);
+      }
+      showToast((resolved.matchSource==='local'?'📗 Kayıtlı üründen':'🌐 Open Food Facts') + ': ' + resolved.name);
+      renderBeslenme();
+      await new Promise(r => setTimeout(r, 100));
+      _processNutQueue();
+      return;
+    }
+
+    // ---- KADEME 3: Gemini tahmini (yaklaşık değer) ----
     const prompt = `Sen bir beslenme uzmanısın. Kullanıcının yazdığı yiyeceği/öğünü analiz et.
 Kurallar:
 1. SADECE JSON döndür. Markdown yok, açıklama yok, kod bloğu yok.
@@ -4557,6 +4845,8 @@ SADECE JSON:`;
         carbs:    Math.round((parsed.totalCarbs   || 0) * 10) / 10,
         fat:      Math.round((parsed.totalFat     || 0) * 10) / 10,
         emoji:    parsed.emoji || '🍽️',
+        portionNote: '~AI tahmini',
+        matchSource: 'ai',
         pending:  false,
       };
       ST.nutritionLogs[idx] = updated;
@@ -4768,6 +5058,7 @@ async function init(){
   ST.measurements=await DB.getAll('measurements');
   ST.customExercises=await DB.getAll('customExercises');
   ST.nutritionLogs=await DB.getAll('nutritionLogs');
+  ST.foodDb=await DB.getAll('foodDb');
   const allPrs=await DB.getAll('prs');
   allPrs.forEach(p=>{ST.prs[p.exId]=p;});
   // Migrate old PRs from settings store to prs store
