@@ -7,12 +7,19 @@
 //   2. Timestamp replay attack koruması (±5 dakika pencere)
 //   3. Timing-safe imza karşılaştırma
 //   4. Model beyaz listesi
-//   5. CORS başlıkları
+//   5. generationConfig beyaz listesi (yeni)
+//   6. CORS başlıkları
 //
 // Vercel Environment Variables (zorunlu):
 //   GEMINI_KEY  — Gerçek Gemini API key (asla client'a gönderilmez)
 //   APP_SECRET  — HMAC imzalama için paylaşılan sır
 //                 (index.html içindeki APP_SECRET ile AYNI olmalı)
+//
+// DEĞİŞİKLİK (v2.3): generationConfig artık Gemini'ye İLETİLİYOR.
+//   Eskiden sadece `contents` forward ediliyordu; client'ın gönderdiği
+//   JSON modu / thinkingBudget / maxOutputTokens sessizce düşüyordu.
+//   Bu, gemini-2.5-flash'ın düşünme bütçesini tüketip BOŞ yanıt
+//   dönmesine ve "Fotoğraf analiz hatası"na yol açıyordu.
 // ============================================================
 
 import crypto from 'crypto';
@@ -31,6 +38,42 @@ const ALLOWED_MODELS = new Set([
   'gemini-2.0-flash',
   'gemini-1.5-flash',
 ]);
+
+// generationConfig içinde iletilmesine izin verilen alanlar
+const ALLOWED_GEN_KEYS = new Set([
+  'temperature', 'topP', 'topK', 'maxOutputTokens',
+  'responseMimeType', 'responseSchema', 'stopSequences',
+  'candidateCount', 'thinkingConfig', 'seed',
+]);
+
+const MAX_OUTPUT_TOKENS_CAP = 8192; // maliyet güvenliği
+
+/**
+ * generationConfig'i temizle: sadece bilinen alanları geçir,
+ * maxOutputTokens'ı sınırla. Bilinmeyen alan gelirse yok sayılır.
+ */
+function sanitizeGenerationConfig(cfg) {
+  if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) return null;
+  const out = {};
+  for (const [k, v] of Object.entries(cfg)) {
+    if (!ALLOWED_GEN_KEYS.has(k)) continue;
+    if (k === 'maxOutputTokens') {
+      const n = Number(v);
+      if (Number.isFinite(n) && n > 0) out[k] = Math.min(Math.floor(n), MAX_OUTPUT_TOKENS_CAP);
+      continue;
+    }
+    if (k === 'thinkingConfig') {
+      // { thinkingBudget: number } — sadece sayıyı geçir
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        const b = Number(v.thinkingBudget);
+        if (Number.isFinite(b) && b >= 0) out.thinkingConfig = { thinkingBudget: Math.floor(b) };
+      }
+      continue;
+    }
+    out[k] = v;
+  }
+  return Object.keys(out).length ? out : null;
+}
 
 /**
  * Sabit zamanlı string karşılaştırma.
@@ -106,18 +149,37 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Geçersiz contents' });
   }
 
-  // ── 6. Gemini API'ye forward ──────────────────────────────
+  // ── 6. Gemini'ye gönderilecek gövdeyi kur ────────────────
+  const geminiBody = { contents: payload.contents };
+
+  // YENİ: generationConfig'i temizleyip ilet (JSON modu, thinkingBudget vb.)
+  const genCfg = sanitizeGenerationConfig(payload.generationConfig);
+  if (genCfg) geminiBody.generationConfig = genCfg;
+
+  // ── 7. Gemini API'ye forward ──────────────────────────────
   try {
     const geminiResp = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`,
       {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ contents: payload.contents }),
+        body:    JSON.stringify(geminiBody),
       }
     );
 
     const data = await geminiResp.json();
+
+    // Teşhis kolaylığı: boş yanıt geldiyse logla (client de mesaj gösteriyor)
+    if (geminiResp.ok) {
+      const cand  = data?.candidates?.[0];
+      const parts = cand?.content?.parts;
+      const hasText = Array.isArray(parts) && parts.some(p => p.text);
+      if (!hasText) {
+        console.warn('[kaslog-proxy] BOŞ yanıt — finishReason:', cand?.finishReason,
+                     '| blockReason:', data?.promptFeedback?.blockReason,
+                     '| genCfg:', JSON.stringify(genCfg));
+      }
+    }
 
     // Gemini hata yanıtlarını olduğu gibi ilet
     return res.status(geminiResp.ok ? 200 : geminiResp.status).json(data);
@@ -128,11 +190,15 @@ export default async function handler(req, res) {
   }
 }
 
-// Büyük fotoğraflar için body limit artırıldı (varsayılan 1mb → 12mb)
+// ⚠️ NOT: Aşağıdaki `config` export'u Next.js Pages Router API route'larına
+// özgüdür; sade Vercel Function'da YOK SAYILIR. Ayrıca Vercel'in serverless
+// istek gövdesi için ~4.5 MB PLATFORM sınırı vardır — '12mb' yazmak bunu
+// aşamaz. Bu yüzden fotoğraflar client tarafında 1280px JPEG'e küçültülüyor
+// (index.html → _prepImagePart). Gövde ~150-300 KB'a düşer, sınır sorun olmaz.
 export const config = {
   api: {
     bodyParser: {
-      sizeLimit: '12mb',
+      sizeLimit: '4mb',
     },
   },
 };
