@@ -999,6 +999,26 @@ canvas{width:100%;height:100%;}
 </div>
 
 <!-- Nutrition Day Detail Modal -->
+<div class="modal-backdrop" id="modal-nut-edit">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">✏️ Öğünü Düzenle</div>
+      <button class="modal-close" onclick="closeModal('modal-nut-edit')">✕</button>
+    </div>
+    <div class="modal-body">
+      <label class="form-label">İsim</label>
+      <input class="form-input" id="ne-name" style="margin-bottom:12px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+        <div><label class="form-label">Kalori</label><input class="form-input" id="ne-kcal" type="number" inputmode="numeric"></div>
+        <div><label class="form-label">Protein (g)</label><input class="form-input" id="ne-protein" type="number" inputmode="decimal" step="0.1"></div>
+        <div><label class="form-label">Karb (g)</label><input class="form-input" id="ne-carbs" type="number" inputmode="decimal" step="0.1"></div>
+        <div><label class="form-label">Yağ (g)</label><input class="form-input" id="ne-fat" type="number" inputmode="decimal" step="0.1"></div>
+      </div>
+      <button class="btn btn-primary btn-full" onclick="saveNutEdit()" style="margin-bottom:8px">Kaydet</button>
+      <button id="ne-wrong-btn" onclick="nutEditWrongMatch()" style="display:none;width:100%;padding:10px;border-radius:12px;background:rgba(239,68,68,0.1);border:1.5px solid rgba(239,68,68,0.35);color:var(--danger);font-size:13px;font-weight:600;cursor:pointer">❌ Yanlış ürün eşleşmiş — kayıttan sil ve AI ile tekrar dene</button>
+    </div>
+  </div>
+</div>
 <div class="modal-backdrop" id="modal-nut-day">
   <div class="modal-sheet" style="max-height:90vh">
     <div class="modal-handle"></div>
@@ -1070,21 +1090,30 @@ async function _signPayload(payload) {
 }
 
 // Gemini çağrısı — kişisel key varsa direkt, yoksa güvenli proxy
-async function callGemini(contents, model) {
+// JSON bekleyen çağrılar için: düşünme bütçesini kapat, JSON modunu aç.
+// (gemini-2.5-flash varsayılan olarak "thinking" yapar; çıktı bütçesini tüketip
+//  BOŞ yanıt dönebilir — fotoğraf analiz hatasının en olası sebebi bu.)
+const NUT_GEN_CFG = { responseMimeType: 'application/json', maxOutputTokens: 1024, temperature: 0.2, thinkingConfig: { thinkingBudget: 0 } };
+let _genCfgSupported = true; // proxy kabul etmezse otomatik kapanır
+
+async function callGemini(contents, model, genCfg) {
   model = model || ST.settings.geminiModel || 'gemini-2.5-flash';
 
   // Kişisel key ayarlı → direkt çağrı (gelişmiş kullanıcılar için)
   if (ST.settings.geminiKey?.trim()) {
+    const body = { contents };
+    if (genCfg) body.generationConfig = genCfg;
     const resp = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${ST.settings.geminiKey.trim()}`,
       { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents }) }
+        body: JSON.stringify(body) }
     );
     return resp.json();
   }
 
   // Proxy üzerinden — HMAC imzalı istek
-  const payload = { model, contents };
+  const useCfg = !!(genCfg && _genCfgSupported);
+  const payload = useCfg ? { model, contents, generationConfig: genCfg } : { model, contents };
   const { timestamp, nonce, signature } = await _signPayload(payload);
 
   const resp = await fetch(PROXY_URL, {
@@ -1104,6 +1133,11 @@ async function callGemini(contents, model) {
       errMsg = 'API_KEY invalid';
     else
       errMsg = errMsg || `Proxy hatası (${resp.status})`;
+    // Proxy generationConfig'i kabul etmiyorsa: kalıcı kapat ve configsiz tekrar dene
+    if (useCfg && (resp.status === 400 || resp.status === 422 || /invalid|unexpected|unknown|signature/i.test(errMsg))) {
+      _genCfgSupported = false;
+      return callGemini(contents, model, null);
+    }
     throw new Error(errMsg);
   }
   return resp.json();
@@ -2179,7 +2213,7 @@ function renderWoExercise(){
   const sug=getProgressiveOverloadSuggestion(se.exId, se.targetReps);
   const badge=document.getElementById('wo-overload-badge');
   if(badge){
-    if(sug){badge.style.display='inline';badge.textContent=sug.type==='increase'?`🔼 ${sug.suggestedWeight}kg dene`:`${sug.workW}kg · ${sug.target} tekrar hedefle`;}
+    if(sug){badge.style.display='inline';badge.textContent=sug.type==='increase'?`🔼 ${sug.suggestedWeight}kg dene`:sug.type==='deload'?`🔻 Plato — ${sug.suggestedWeight}kg'a düş, 2 hafta sonra tırman`:`${sug.workW}kg · ${sug.target} tekrar hedefle`;}
     else badge.style.display='none';
   }
   const last=se.completedSets[se.completedSets.length-1];
@@ -2188,7 +2222,7 @@ function renderWoExercise(){
   const prevSet=(se.prevSets&&se.prevSets.length)
     ? (se.prevSets[setIdx]??se.prevSets[se.prevSets.length-1])
     : se.prevPerf;
-  let prefillWeight=last?.weight??(sug?.type==='increase'?sug.suggestedWeight:(prevSet?.weight??0));
+  let prefillWeight=last?.weight??((sug?.type==='increase'||sug?.type==='deload')?sug.suggestedWeight:(prevSet?.weight??0));
   document.getElementById('wo-weight').value=prefillWeight;
   document.getElementById('wo-reps').value=last?.reps??(prevSet?.reps??se.targetReps);
   // i18n labels
@@ -3070,7 +3104,7 @@ function renderAyarlar(){
       <div class="settings-row" onclick="openAILogModal()"><div class="settings-row-left"><div class="settings-icon si-orange">🤖</div><div><div class="settings-row-title">AI Antrenman Analizi</div><div class="settings-row-sub">Gelişim tablosu, öneriler, PR analizi</div></div></div><div class="settings-row-value"><svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></div></div>
       <div class="settings-row" onclick="clearData()"><div class="settings-row-left"><div class="settings-icon si-red">🗑️</div><div><div class="settings-row-title" style="color:var(--danger)">${T('delete_data')}</div><div class="settings-row-sub">${T('delete_sub')}</div></div></div><div class="settings-row-value"><svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></div></div>
     </div></div>
-    <div style="text-align:center;padding:20px;color:var(--text3);font-size:12px">KASLOG v2.1 · Home Workout Tracker</div>
+    <div style="text-align:center;padding:20px;color:var(--text3);font-size:12px">KASLOG v2.2 beta · Home Workout Tracker</div>
   `;
 }
 
@@ -3235,7 +3269,7 @@ function openExportModal(){
 }
 
 function exportData(){
-  const backup={version:'kaslog_v2',exportDate:new Date().toISOString(),settings:ST.settings,routines:ST.routines,workoutLogs:ST.workoutLogs,measurements:ST.measurements,customExercises:ST.customExercises,prs:Object.values(ST.prs)};
+  const backup={version:'kaslog_v2',exportDate:new Date().toISOString(),settings:ST.settings,routines:ST.routines,workoutLogs:ST.workoutLogs,measurements:ST.measurements,customExercises:ST.customExercises,prs:Object.values(ST.prs),nutritionLogs:ST.nutritionLogs,foodDb:ST.foodDb};
   const json=JSON.stringify(backup,null,2);
   const blob=new Blob([json],{type:'application/json'});
   const url=URL.createObjectURL(blob);
@@ -3502,6 +3536,8 @@ async function handleImportFile(input){
     if(backup.measurements){for(const m of backup.measurements)await DB.put('measurements',m);ST.measurements=backup.measurements;}
     if(backup.customExercises){for(const c of backup.customExercises)await DB.put('customExercises',c);ST.customExercises=backup.customExercises;}
     if(backup.prs){for(const p of backup.prs){await DB.put('prs',p);ST.prs[p.exId]=p;}}
+    if(backup.nutritionLogs){for(const n of backup.nutritionLogs)await DB.put('nutritionLogs',n);ST.nutritionLogs=backup.nutritionLogs;}
+    if(backup.foodDb){for(const f of backup.foodDb)await DB.put('foodDb',f);ST.foodDb=backup.foodDb;}
     closeModal('modal-data');
     renderAll();
     setTimeout(()=>showToast(T('import_success')),300);
@@ -3638,16 +3674,17 @@ function toggleTipWrap() {
 // tekrarı tutturduysan → kiloyu artır. Tutturamadıysan (yorgun gün dahil) →
 // aynı kiloda kal, tekrarı büyütmeye çalış. Tek kötü gün seni asla geriletmez.
 function getProgressiveOverloadSuggestion(exId, targetReps) {
-  // Son antrenmandaki bu egzersizin work setlerini bul
-  let lastSets = null;
-  for (let i = ST.workoutLogs.length - 1; i >= 0; i--) {
+  // Son 3 antrenmandaki bu egzersizin work setlerini topla (yeni→eski)
+  const sessions = [];
+  for (let i = ST.workoutLogs.length - 1; i >= 0 && sessions.length < 3; i--) {
     const ex = ST.workoutLogs[i].exercises?.find(e => e.exId === exId);
     if (ex) {
       const ws = (ex.sets || []).filter(s => !s.isWarmup && s.weight > 0);
-      if (ws.length) { lastSets = ws; break; }
+      if (ws.length) sessions.push(ws);
     }
   }
-  if (!lastSets) return null;
+  if (!sessions.length) return null;
+  const lastSets = sessions[0];
   const workW = Math.max(...lastSets.map(s => s.weight));   // çalışma ağırlığı
   const setsAtW = lastSets.filter(s => s.weight === workW);
   const topReps = Math.max(...setsAtW.map(s => s.reps));     // o kilodaki en iyi set
@@ -3656,7 +3693,21 @@ function getProgressiveOverloadSuggestion(exId, targetReps) {
     // Hedefi tutturdun → küçük bir kilo artışı öner
     return { type: 'increase', suggestedWeight: +(workW + 0.5).toFixed(1), workW, target };
   }
-  // Tutturamadın → aynı kiloda kal, tekrarı hedefe taşı
+  // PLATO KONTROLÜ: son 3 seans da aynı kiloda ve hepsinde hedef kaçtıysa → deload
+  if (sessions.length >= 3) {
+    const allStuck = sessions.every(ws => {
+      const w = Math.max(...ws.map(s => s.weight));
+      if (w !== workW) return false;
+      const tr = Math.max(...ws.filter(s => s.weight === w).map(s => s.reps));
+      return tr < target;
+    });
+    if (allStuck) {
+      // %10 düşür, 0.5'e yuvarla — 2 hafta sonra geri tırman
+      const deloadW = Math.max(0.5, Math.round(workW * 0.9 * 2) / 2);
+      return { type: 'deload', suggestedWeight: deloadW, workW, target, topReps };
+    }
+  }
+  // Tutturamadın (ama plato değil) → aynı kiloda kal, tekrarı hedefe taşı
   return { type: 'maintain', suggestedWeight: workW, workW, target, topReps };
 }
 function _oldOverload_unused(exId) {
@@ -3944,23 +3995,36 @@ function renderBeslenmeStats(el) {
     chartDays.push({ key, kcal, protein, label: dayLabelArr[d.getDay()], dayNum: d.getDate() });
   }
 
-  // Günlük Detay listesi için: ilk log tarihinden itibaren
+  // Günlük Detay: AY BAZLI SAYFALAMA (her ay 1 sayfa, 28-31 gün otomatik)
   const allNutLogsForDays = ST.nutritionLogs;
-  let detailStart = todayD;
+  // İlk log ayı = geriye gidilebilecek sınır
+  let minMonthKey = `${todayD.getFullYear()}-${String(todayD.getMonth()+1).padStart(2,'0')}`;
   if (allNutLogsForDays.length > 0) {
-    const sortedDates = allNutLogsForDays.map(e => e.date).sort();
-    const firstLogDate = new Date(sortedDates[0] + 'T00:00:00'); firstLogDate.setHours(0,0,0,0);
-    detailStart = firstLogDate;
+    minMonthKey = allNutLogsForDays.map(e => e.date.slice(0,7)).sort()[0];
   }
+  const curMonthKey = `${todayD.getFullYear()}-${String(todayD.getMonth()+1).padStart(2,'0')}`;
+  // Seçili ay yoksa veya sınır dışındaysa bu aya dön
+  if (!window._nutStatMonth || window._nutStatMonth > curMonthKey || window._nutStatMonth < minMonthKey)
+    window._nutStatMonth = curMonthKey;
+  const [selY, selM] = window._nutStatMonth.split('-').map(Number);
+  const daysInMonth = new Date(selY, selM, 0).getDate(); // 28/29/30/31 otomatik
+  const isCurMonth = window._nutStatMonth === curMonthKey;
+  const lastDay = isCurMonth ? todayD.getDate() : daysInMonth; // bu ayda geleceği gösterme
+  const MONTH_NAMES = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
   const days = [];
-  for (let dc = new Date(detailStart); dc <= todayD; dc.setDate(dc.getDate() + 1)) {
-    const d = new Date(dc);
-    const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  for (let dn = 1; dn <= lastDay; dn++) {
+    const d = new Date(selY, selM - 1, dn);
+    const key = `${selY}-${String(selM).padStart(2,'0')}-${String(dn).padStart(2,'0')}`;
     const entries = ST.nutritionLogs.filter(e => e.date === key);
     const kcal = Math.round(entries.reduce((a,e) => a+(e.calories||0), 0));
     const protein = Math.round(entries.reduce((a,e) => a+(e.protein||0), 0));
-    days.push({ key, kcal, protein, label: dayLabelArr[d.getDay()], dayNum: d.getDate() });
+    days.push({ key, kcal, protein, label: dayLabelArr[d.getDay()], dayNum: dn });
   }
+  const canPrev = window._nutStatMonth > minMonthKey;
+  const canNext = window._nutStatMonth < curMonthKey;
+  // Ay özeti (kayıtlı günlerin ortalaması)
+  const monthDaysWithData = days.filter(d => d.kcal > 0);
+  const monthAvgKcal = monthDaysWithData.length ? Math.round(monthDaysWithData.reduce((a,d)=>a+d.kcal,0)/monthDaysWithData.length) : 0;
 
   // Tüm zamanların ortalaması: ilk log gününden bugüne kaç gün
   const allNutLogs = ST.nutritionLogs;
@@ -3987,6 +4051,46 @@ function renderBeslenmeStats(el) {
   const avgKcalPct = goals.kcal > 0 ? Math.round(avgKcal / goals.kcal * 100) : 0;
   const avgProtPct = goals.protein > 0 ? Math.round(avgProtein / goals.protein * 100) : 0;
 
+
+  // ---- GERÇEK TDEE TAHMİNİ (kilo değişimi + kalori verisi) ----
+  // Son ~35 günde: ≥2 kilo ölçümü (≥14 gün arayla) + ≥10 kayıtlı beslenme günü gerek
+  let tdeeCard = '';
+  {
+    const wMs = ST.measurements.filter(m => m.weight).sort((a,b) => new Date(a.date) - new Date(b.date));
+    const cut = new Date(); cut.setDate(cut.getDate() - 35);
+    const recent = wMs.filter(m => new Date(m.date) >= cut);
+    if (recent.length >= 2) {
+      const first = recent[0], last = recent[recent.length - 1];
+      const spanDays = Math.round((new Date(last.date) - new Date(first.date)) / 86400000);
+      if (spanDays >= 14) {
+        const fKey = new Date(first.date).toISOString().slice(0,10);
+        const lKey = new Date(last.date).toISOString().slice(0,10);
+        const periodLogs = ST.nutritionLogs.filter(e => e.date >= fKey && e.date <= lKey && e.calories > 0);
+        const loggedDays = new Set(periodLogs.map(e => e.date)).size;
+        if (loggedDays >= 10) {
+          const avgIntake = Math.round(periodLogs.reduce((a,e) => a + e.calories, 0) / loggedDays);
+          const dWeight = last.weight - first.weight; // kg
+          // 1 kg yağ ≈ 7700 kcal → günlük enerji açığı/fazlası
+          const dailySurplus = (dWeight * 7700) / spanDays;
+          const tdee = Math.round(avgIntake - dailySurplus);
+          const trend = dWeight > 0.2 ? `+${dWeight.toFixed(1)}kg` : dWeight < -0.2 ? `${dWeight.toFixed(1)}kg` : 'sabit';
+          const cover = Math.round(loggedDays / (spanDays + 1) * 100);
+          tdeeCard = `
+          <div style="background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:20px">
+            <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">⚖️ Gerçek Bakım Kalorin (TDEE)</div>
+            <div style="display:flex;align-items:baseline;gap:8px">
+              <div style="font-family:'Barlow Condensed',sans-serif;font-size:30px;font-weight:800;color:var(--accent)">~${tdee}</div>
+              <div style="font-size:13px;color:var(--text2)">kcal/gün</div>
+            </div>
+            <div style="font-size:11.5px;color:var(--text3);margin-top:4px;line-height:1.5">Son ${spanDays} günde ort. ${avgIntake} kcal yedin, kilon ${trend} (${first.weight}→${last.weight}kg). Formül değil, kendi vücudunun ölçümü.${cover < 70 ? ' ⚠️ Sadece günlerin %' + cover + String.fromCharCode(39) + 'i kayıtlı — doğruluk düşük olabilir.' : ''}</div>
+          </div>`;
+        }
+      }
+    }
+    if (!tdeeCard) {
+      tdeeCard = `<div style="background:var(--surface2);border:1px dashed var(--border);border-radius:12px;padding:12px;margin-bottom:20px;font-size:12px;color:var(--text3);line-height:1.5">⚖️ <b style="color:var(--text2)">Gerçek TDEE tahmini</b> için en az 14 gün arayla 2 kilo ölçümü + o aralıkta 10 gün beslenme kaydı gerekiyor. Veri biriktikçe burada bakım kalorin görünecek.</div>`;
+    }
+  }
   el.innerHTML = `
     <div style="padding:16px 20px 8px">
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px">
@@ -4006,6 +4110,7 @@ function renderBeslenmeStats(el) {
           <div style="font-size:12px;color:var(--text2);margin-top:4px">${avgProtPct}% ortalama</div>
         </div>
       </div>
+      ${tdeeCard}
     </div>
 
     <div style="padding:0 20px 8px">
@@ -4018,6 +4123,14 @@ function renderBeslenmeStats(el) {
     </div>
     <div style="padding:12px 20px 20px">
       <div class="section-title" style="margin-bottom:8px">GÜNLÜK DETAY</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:6px 8px">
+        <button onclick="nutStatMonthNav(-1)" ${canPrev?'':'disabled'} style="width:34px;height:34px;border-radius:10px;border:none;background:${canPrev?'var(--surface3)':'transparent'};color:${canPrev?'var(--text)':'var(--text3)'};font-size:16px;cursor:${canPrev?'pointer':'default'};opacity:${canPrev?1:0.35}">‹</button>
+        <div style="text-align:center">
+          <div style="font-family:'Barlow Condensed',sans-serif;font-size:17px;font-weight:700">${MONTH_NAMES[selM-1]} ${selY}</div>
+          <div style="font-size:10px;color:var(--text3)">${monthDaysWithData.length} kayıtlı gün${monthAvgKcal?` · ort. ${monthAvgKcal} kcal`:''}</div>
+        </div>
+        <button onclick="nutStatMonthNav(1)" ${canNext?'':'disabled'} style="width:34px;height:34px;border-radius:10px;border:none;background:${canNext?'var(--surface3)':'transparent'};color:${canNext?'var(--text)':'var(--text3)'};font-size:16px;cursor:${canNext?'pointer':'default'};opacity:${canNext?1:0.35}">›</button>
+      </div>
       <div class="card" style="overflow:hidden">
         ${days.map(d => {
           const pctK = goals.kcal > 0 ? Math.min(100, Math.round(d.kcal/goals.kcal*100)) : 0;
@@ -4054,8 +4167,16 @@ function renderBeslenmeStats(el) {
   }, 60);
 }
 
-function drawNutChart(canvasId, data, labels, goalLine, color, unit) {
-  const canvas = document.getElementById(canvasId); if (!canvas) return;
+// Ay değiştir ve istatistik sekmesini yeniden çiz
+function nutStatMonthNav(delta){
+  const [y,m]=(window._nutStatMonth||'').split('-').map(Number);
+  const d=new Date(y,m-1+delta,1);
+  window._nutStatMonth=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  const el=document.getElementById('stats-inner');
+  if(el) renderBeslenmeStats(el);
+}
+
+function drawNutChart(canvasId, data, labels, goalLine, color, unit) {  const canvas = document.getElementById(canvasId); if (!canvas) return;
   const dpr = window.devicePixelRatio || 1;
   const rect = canvas.getBoundingClientRect();
   if (!rect.width) return;
@@ -4342,6 +4463,27 @@ function renderBeslenme() {
         }
       </button>
     </div>
+    ${(() => {
+      // HIZLI TEKRAR: son 14 günün en sık girilen öğeleri (hatasız, kalorili)
+      const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 14);
+      const cutKey = `${cutoff.getFullYear()}-${String(cutoff.getMonth()+1).padStart(2,'0')}-${String(cutoff.getDate()).padStart(2,'0')}`;
+      const freq = {};
+      for (const e of ST.nutritionLogs) {
+        if (e.date < cutKey || e.error || e.pending || !e.calories) continue;
+        const k = _foodNorm(e.name);
+        if (!k) continue;
+        if (!freq[k]) freq[k] = { count: 0, latest: e };
+        freq[k].count++;
+        if ((e.createdAt||0) > (freq[k].latest.createdAt||0)) freq[k].latest = e;
+      }
+      const chips = Object.values(freq)
+        .filter(f => f.count >= 2)
+        .sort((a,b) => b.count - a.count).slice(0,5);
+      if (!chips.length) return '';
+      return `<div style="display:flex;gap:6px;overflow-x:auto;padding:2px 20px 6px;-webkit-overflow-scrolling:touch;scrollbar-width:none">
+        ${chips.map(c => `<button onclick="quickRepeatEntry('${c.latest.id}')" style="flex-shrink:0;display:inline-flex;align-items:center;gap:5px;padding:7px 12px;border-radius:20px;background:var(--surface2);border:1.5px solid var(--border);color:var(--text);font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap">${c.latest.emoji||'🍽️'} ${c.latest.name}<span style="color:var(--text3);font-weight:500">${Math.round(c.latest.calories)}</span></button>`).join('')}
+      </div>`;
+    })()}
     ${_nutSelectedPhotos.length > 0 ? `
     <div class="nut-photo-strip" id="nut-photo-strip">
       ${_nutSelectedPhotos.map((p,i) => `
@@ -4364,7 +4506,7 @@ function renderBeslenme() {
         const macroHTML = e.pending
           ? '<span class="nut-entry-macro" style="color:var(--text3);font-style:italic">⏳ AI analiz ediyor...</span>'
           : e.error
-          ? '<span class="nut-entry-macro" style="color:var(--danger)">⚠️ Analiz başarısız — tekrar dene</span>'
+          ? '<span class="nut-entry-macro" style="color:var(--danger)">⚠️ ' + (e.errMsg || 'Analiz başarısız — tekrar dene') + '</span>'
           : '<span class="nut-entry-macro">\u{1F969} ' + Math.round(e.protein||0) + 'g protein</span>' +
             '<span class="nut-entry-macro">\u{1F33E} ' + Math.round(e.carbs||0) + 'g karb</span>' +
             '<span class="nut-entry-macro">\u{1F9C8} ' + Math.round(e.fat||0) + 'g yağ</span>';
@@ -4382,6 +4524,9 @@ function renderBeslenme() {
             ? `<button class="nut-retry-btn" onclick="retryNutritionEntry('${e.id}')">🔄 Tekrar</button>`
             : `<div class="nut-entry-kcal">${e.pending ? '—' : Math.round(e.calories||0)}</div>`
           }
+          ${!e.pending && !e.error ? `<button class="nut-del-btn" onclick="openNutEdit('${e.id}')" title="Düzenle">
+            <svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>` : ''}
           <button class="nut-del-btn" onclick="deleteNutritionEntry('${e.id}')">
             <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
           </button>
@@ -4447,9 +4592,84 @@ async function sendNutPhotos() {
   const input = document.getElementById('nut-input');
   const userText = input?.value?.trim() || '';
   if (input) input.value = '';
-  await handleNutPhotos(_nutSelectedPhotos.map(p => p.file), userText);
-  _nutSelectedPhotos = [];
+  const ok = await handleNutPhotos(_nutSelectedPhotos.map(p => p.file), userText);
+  if (ok) { _nutSelectedPhotos = []; }
   renderBeslenme();
+  // Hata olduysa yazıyı geri koy — kullanıcı baştan yazmasın
+  if (!ok && userText) { const i2 = document.getElementById('nut-input'); if (i2) i2.value = userText; }
+}
+
+// ---- Görüntüyü küçült + JPEG'e çevir (payload'ı ~20-40 kat küçültür) ----
+// Ham telefon fotoğrafı 3-6MB → base64 ile ~8MB gövde → proxy/API reddi.
+// Ayrıca HEIC/PNG gibi desteklenmeyen formatları JPEG'e normalize eder.
+async function _prepImagePart(file, maxDim = 1280, quality = 0.85) {
+  try {
+    const bmp = await createImageBitmap(file);
+    let { width: w, height: h } = bmp;
+    const scale = Math.min(1, maxDim / Math.max(w, h));
+    w = Math.round(w * scale); h = Math.round(h * scale);
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bmp, 0, 0, w, h);
+    bmp.close?.();
+    const dataUrl = canvas.toDataURL('image/jpeg', quality);
+    return { inline_data: { mime_type: 'image/jpeg', data: dataUrl.split(',')[1] } };
+  } catch (e) {
+    // Canvas başarısız olursa ham dosyaya düş
+    const b64 = await new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(r.result.split(',')[1]);
+      r.onerror = rej;
+      r.readAsDataURL(file);
+    });
+    return { inline_data: { mime_type: file.type || 'image/jpeg', data: b64 } };
+  }
+}
+
+// ---- Gemini yanıtından metni güvenle çıkar (boş/kesik yanıtı teşhis eder) ----
+function _geminiText(data) {
+  const cand = data?.candidates?.[0];
+  const fr = cand?.finishReason;
+  const parts = cand?.content?.parts;
+  const txt = Array.isArray(parts) ? parts.map(p => p.text || '').join('').trim() : '';
+  if (!txt) {
+    if (fr === 'MAX_TOKENS') throw new Error('EMPTY_MAX_TOKENS');
+    if (fr === 'SAFETY' || fr === 'PROHIBITED_CONTENT') throw new Error('EMPTY_SAFETY');
+    if (data?.promptFeedback?.blockReason) throw new Error('EMPTY_SAFETY');
+    throw new Error('EMPTY_RESPONSE' + (fr ? ':' + fr : ''));
+  }
+  return txt;
+}
+
+// ---- Metinden JSON'u kurtar (model açıklama/markdown eklerse bile) ----
+function _extractJson(raw) {
+  let s = raw.replace(/```json/gi, '').replace(/```/g, '').trim();
+  try { return JSON.parse(s); } catch {}
+  const i = s.indexOf('{'), j = s.lastIndexOf('}');
+  if (i !== -1 && j > i) {
+    try { return JSON.parse(s.slice(i, j + 1)); } catch {}
+  }
+  throw new Error('BAD_JSON');
+}
+
+// ---- Hata mesajını insan diline çevir ----
+function _nutErrMsg(err) {
+  const m = err?.message || '';
+  if (m.includes('EMPTY_MAX_TOKENS')) return '🧠 Model yanıtı yarıda kesildi — tekrar dene';
+  if (m.includes('EMPTY_SAFETY'))     return '🚫 Model bu görseli analiz etmedi — başka açıdan çek';
+  if (m.includes('EMPTY_RESPONSE'))   return '📭 Model boş yanıt verdi — tekrar dene';
+  if (m.includes('BAD_JSON'))         return '🧩 Yanıt okunamadı — tekrar dene';
+  if (m.includes('413') || m.includes('too large') || m.includes('PayloadTooLarge'))
+    return '🖼️ Fotoğraf çok büyük — daha küçük/yakın çek';
+  if (m.includes('high demand') || m.includes('503') || m.includes('529'))
+    return '⏳ Sunucu yoğun, biraz sonra tekrar dene';
+  if (m.includes('quota') || m.includes('429')) return '🚦 Kota doldu, biraz bekle';
+  if (m.includes('API_KEY')) return '🔑 API anahtarı geçersiz — Ayarlar\'ı kontrol et';
+  if (m.includes('network') || m.includes('Failed') || m.includes('timeout'))
+    return '📡 Bağlantı hatası — interneti kontrol et';
+  if (/\b400\b/.test(m)) return '⚠️ İstek reddedildi (400) — fotoğrafı yeniden çek';
+  return '📷 Analiz hatası: ' + (m.slice(0, 60) || 'bilinmeyen');
 }
 
 // ---- Fotoğraftan beslenme analizi ----
@@ -4468,6 +4688,7 @@ async function handleNutPhotos(files, userText = '') {
     });
   }
 
+  let ok = false;
   try {
     // ---- KADEME A: Barkod tara → Open Food Facts (kesin veri) ----
     const barcode = await _detectBarcode(files);
@@ -4483,7 +4704,7 @@ async function handleNutPhotos(files, userText = '') {
           name: food.name + (qty !== 1 ? ' ×' + qty : ''),
           calories: mac.calories, protein: mac.protein, carbs: mac.carbs, fat: mac.fat,
           emoji: '📦', pending: false, fromPhoto: true,
-          portionNote: mac.portionNote, matchSource: 'barcode',
+          portionNote: mac.portionNote, matchSource: 'barcode', foodId: food.id,
           createdAt: Date.now(),
         };
         await DB.put('nutritionLogs', entry);
@@ -4497,9 +4718,8 @@ async function handleNutPhotos(files, userText = '') {
     }
 
     // ---- KADEME B: Gemini görsel tanıma / etiket okuma ----
-    const imageParts = await Promise.all(files.map(async f => ({
-      inline_data: { mime_type: f.type || 'image/jpeg', data: await toBase64(f) }
-    })));
+    // Fotoğrafları küçült (1280px, JPEG) — ham dosya proxy limitini aşıyordu
+    const imageParts = await Promise.all(files.map(f => _prepImagePart(f)));
 
     const textPart = {
       text: `Sen bir beslenme uzmanısın. Bu görsellerdeki yiyecek/ürünü analiz et.
@@ -4521,12 +4741,10 @@ Kurallar:
 SADECE JSON:`
     };
 
-    const data = await callGemini([{ parts: [...imageParts, textPart] }]);
+    const data = await callGemini([{ parts: [...imageParts, textPart] }], null, NUT_GEN_CFG);
     if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
 
-    let raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    raw = raw.replace(/```json|```/g, '').trim();
-    const parsed = JSON.parse(raw);
+    const parsed = _extractJson(_geminiText(data));
 
     // ---- KADEME C: Markalı ürün tanındıysa önce lokal/OFF'tan KESİN veri dene ----
     if (parsed.productQuery && parsed.source !== 'label') {
@@ -4540,7 +4758,7 @@ SADECE JSON:`
           calories: resolved.calories, protein: resolved.protein,
           carbs: resolved.carbs, fat: resolved.fat,
           emoji: resolved.emoji, pending: false, fromPhoto: true,
-          portionNote: resolved.portionNote, matchSource: resolved.matchSource,
+          portionNote: resolved.portionNote, matchSource: resolved.matchSource, foodId: resolved.foodId||null,
           createdAt: Date.now(),
         };
         await DB.put('nutritionLogs', entry);
@@ -4585,21 +4803,14 @@ SADECE JSON:`
     ST.nutritionLogs.push(entry);
     renderBeslenme();
     showToast(`${sourceIcon} ${parsed.source === 'label' ? 'Etiket okundu' : 'AI tahmini'}: ${entry.name}`);
+    ok = true;
   } catch(err) {
-    const raw = err.message || '';
-    let photoErrMsg;
-    if (raw.includes('high demand') || raw.includes('503') || raw.includes('529'))
-      photoErrMsg = '⏳ Sunucu yoğun, biraz sonra tekrar dene';
-    else if (raw.includes('quota') || raw.includes('429'))
-      photoErrMsg = '🚦 Kota doldu, biraz bekle';
-    else if (raw.includes('network') || raw.includes('Failed'))
-      photoErrMsg = '📡 Bağlantı hatası — interneti kontrol et';
-    else
-      photoErrMsg = '📷 Fotoğraf analiz hatası — tekrar dene';
-    showToast(photoErrMsg, true);
+    console.error('[Beslenme foto]', err);
+    showToast(_nutErrMsg(err), true);
   } finally {
     if (addBtn) addBtn.classList.remove('loading');
   }
+  return ok; // false → çağıran fotoğrafı ve yazıyı SİLMEZ
 }
 
 // ============================================================
@@ -4728,11 +4939,11 @@ async function _cascadeResolveText(text){
   if(!product) return null;
   // 1) Lokal (öğrenilmiş ürünler)
   let food=_lookupLocalFood(product);
-  if(food) return {..._foodToMacros(food,qty,grams),name:food.name+(qty!==1?' \u00d7'+qty:''),emoji:'\ud83d\udcd7',matchSource:'local'};
+  if(food) return {..._foodToMacros(food,qty,grams),name:food.name+(qty!==1?' \u00d7'+qty:''),emoji:'\ud83d\udcd7',matchSource:'local',foodId:food.id};
   // 2) Open Food Facts
   food=await _lookupOFFByName(product);
   if(food){ await _learnFood(food); // öğren → bir dahakine lokalden gelir
-    return {..._foodToMacros(food,qty,grams),name:food.name+(qty!==1?' \u00d7'+qty:''),emoji:'\ud83c\udf10',matchSource:'off'};
+    return {..._foodToMacros(food,qty,grams),name:food.name+(qty!==1?' \u00d7'+qty:''),emoji:'\ud83c\udf10',matchSource:'off',foodId:food.id};
   }
   return null; // 3) Gemini tahminine düşecek
 }
@@ -4760,9 +4971,10 @@ async function addNutritionEntry() {
   if (_nutSelectedPhotos.length > 0) {
     const userText = text || '';
     input.value = '';
-    await handleNutPhotos(_nutSelectedPhotos.map(p => p.file), userText);
-    _nutSelectedPhotos = [];
+    const okPhoto = await handleNutPhotos(_nutSelectedPhotos.map(p => p.file), userText);
+    if (okPhoto) { _nutSelectedPhotos = []; }
     renderBeslenme();
+    if (!okPhoto && userText) { const i2 = document.getElementById('nut-input'); if (i2) i2.value = userText; }
     return;
   }
 
@@ -4806,7 +5018,7 @@ async function _processNutQueue() {
           name: resolved.name, calories: resolved.calories,
           protein: resolved.protein, carbs: resolved.carbs, fat: resolved.fat,
           emoji: resolved.emoji, portionNote: resolved.portionNote,
-          matchSource: resolved.matchSource, pending: false,
+          matchSource: resolved.matchSource, foodId: resolved.foodId||null, pending: false,
         };
         ST.nutritionLogs[idx] = updated;
         await DB.put('nutritionLogs', updated);
@@ -4822,18 +5034,41 @@ async function _processNutQueue() {
     const prompt = `Sen bir beslenme uzmanısın. Kullanıcının yazdığı yiyeceği/öğünü analiz et.
 Kurallar:
 1. SADECE JSON döndür. Markdown yok, açıklama yok, kod bloğu yok.
-2. Şema: {"name":"string","totalKcal":number,"totalProtein":number,"totalCarbs":number,"totalFat":number,"emoji":"string"}
+2. Şema: {"name":"string","totalKcal":number,"totalProtein":number,"totalCarbs":number,"totalFat":number,"emoji":"string","productQuery":"string|null"}
 3. name: Türkçe isim. Gramaj belirtilmişse ekle (örn: "Tavuk Göğsü (200g)").
 4. Değerler GERÇEK TOPLAM — 100g baz değil. Birden fazla yiyecek varsa hepsini hesapla ve topla.
 5. Tek uygun emoji.
+6. productQuery: Girişte YAZIM HATASI olabilir. Markalı paketli tek bir ürünse doğru marka+ürün adını yaz (örn "Üpker çokonat maxi" → "Ülker Çokonat Maxi"). Ev yemeği/tabak/birden fazla yiyecekse null.
 Giriş: "${text}"
 SADECE JSON:`;
 
-    const data = await callGemini([{ parts: [{ text: prompt }] }]);
+    const data = await callGemini([{ parts: [{ text: prompt }] }], null, NUT_GEN_CFG);
     if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
-    let raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    raw = raw.replace(/```json|```/g,'').trim();
-    const parsed = JSON.parse(raw);
+    const parsed = _extractJson(_geminiText(data));
+
+    // Yazım hatası düzeltildiyse kademeyi tekrar dene (kesin veri > AI tahmini)
+    if (parsed.productQuery && _foodNorm(parsed.productQuery) !== _foodNorm(_parseFoodText(text).product)) {
+      const { qty, grams } = _parseFoodText(text);
+      const fixed = await _cascadeResolveText(
+        (qty !== 1 ? qty + ' ' : '') + parsed.productQuery + (grams ? ' ' + grams + 'g' : '')
+      );
+      if (fixed) {
+        const i0 = ST.nutritionLogs.findIndex(e => e.id === pendingId);
+        if (i0 !== -1) {
+          const up = { ...ST.nutritionLogs[i0], name: fixed.name, calories: fixed.calories,
+            protein: fixed.protein, carbs: fixed.carbs, fat: fixed.fat, emoji: fixed.emoji,
+            portionNote: fixed.portionNote, matchSource: fixed.matchSource,
+            foodId: fixed.foodId || null, pending: false };
+          ST.nutritionLogs[i0] = up;
+          await DB.put('nutritionLogs', up);
+        }
+        showToast('✍️ "' + parsed.productQuery + '" olarak düzeltildi');
+        renderBeslenme();
+        await new Promise(r => setTimeout(r, 100));
+        _processNutQueue();
+        return;
+      }
+    }
 
     const idx = ST.nutritionLogs.findIndex(e => e.id === pendingId);
     if (idx !== -1) {
@@ -4858,6 +5093,7 @@ SADECE JSON:`;
       const errEntry = {
         ...ST.nutritionLogs[idx],
         emoji: '❌', pending: false, error: true,
+        errMsg: _nutErrMsg(err),
         name: ST.nutritionLogs[idx].raw || ST.nutritionLogs[idx].name,
       };
       ST.nutritionLogs[idx] = errEntry;
@@ -4901,6 +5137,68 @@ async function retryNutritionEntry(id) {
   // Kuyruğa ekle
   _nutQueue.push({ text, pendingId: id });
   if (!_nutQueueProcessing) _processNutQueue();
+}
+
+
+// HIZLI TEKRAR: geçmiş girişin kopyasını bugüne ekle (AI/API'siz, anında)
+async function quickRepeatEntry(srcId){
+  const src=ST.nutritionLogs.find(e=>e.id===srcId); if(!src) return;
+  const entry={
+    id:'n_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),
+    date:todayDateKey(),
+    name:src.name, calories:src.calories, protein:src.protein,
+    carbs:src.carbs, fat:src.fat, emoji:src.emoji||'🍽️',
+    portionNote:src.portionNote||'', matchSource:'repeat',
+    foodId:src.foodId||null, pending:false, createdAt:Date.now(),
+  };
+  await DB.put('nutritionLogs',entry);
+  ST.nutritionLogs.push(entry);
+  renderBeslenme();
+  showToast('⚡ Eklendi: '+entry.name);
+}
+
+// ÖĞÜN DÜZENLE: yanlış eşleşmeleri düzelt, foodDb'den yanlış öğrenmeyi sil
+let _editNutId=null;
+function openNutEdit(id){
+  const e=ST.nutritionLogs.find(x=>x.id===id); if(!e||e.pending) return;
+  _editNutId=id;
+  document.getElementById('ne-name').value=e.name||'';
+  document.getElementById('ne-kcal').value=Math.round(e.calories||0);
+  document.getElementById('ne-protein').value=e.protein||0;
+  document.getElementById('ne-carbs').value=e.carbs||0;
+  document.getElementById('ne-fat').value=e.fat||0;
+  // Yanlış eşleşme butonu: sadece otomatik eşleşmiş (öğrenilmiş) girişlerde
+  const wrongBtn=document.getElementById('ne-wrong-btn');
+  wrongBtn.style.display=(e.foodId&&ST.foodDb.some(f=>f.id===e.foodId))?'block':'none';
+  openModal('modal-nut-edit');
+}
+async function saveNutEdit(){
+  const idx=ST.nutritionLogs.findIndex(x=>x.id===_editNutId); if(idx===-1) return;
+  const g=id=>document.getElementById(id);
+  const updated={...ST.nutritionLogs[idx],
+    name:g('ne-name').value.trim()||ST.nutritionLogs[idx].name,
+    calories:Math.round(parseFloat(g('ne-kcal').value)||0),
+    protein:Math.round((parseFloat(g('ne-protein').value)||0)*10)/10,
+    carbs:Math.round((parseFloat(g('ne-carbs').value)||0)*10)/10,
+    fat:Math.round((parseFloat(g('ne-fat').value)||0)*10)/10,
+    edited:true,
+  };
+  ST.nutritionLogs[idx]=updated;
+  await DB.put('nutritionLogs',updated);
+  closeModal('modal-nut-edit');
+  renderBeslenme();
+  showToast('✏️ Güncellendi');
+}
+// Yanlış eşleşme: öğrenilmiş ürünü DB'den sil + girişi AI ile yeniden analiz et
+async function nutEditWrongMatch(){
+  const e=ST.nutritionLogs.find(x=>x.id===_editNutId); if(!e) return;
+  if(e.foodId){
+    await DB.del('foodDb',e.foodId);
+    ST.foodDb=ST.foodDb.filter(f=>f.id!==e.foodId);
+  }
+  closeModal('modal-nut-edit');
+  showToast('🗑️ Yanlış eşleşme silindi, AI ile tekrar analiz ediliyor...');
+  await retryNutritionEntry(e.id);
 }
 
 async function deleteNutritionEntry(id) {
