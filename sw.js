@@ -1,4 +1,6 @@
-const CACHE = 'kaslog-v1';
+// Kaslog Service Worker
+// ÖNEMLİ: Her yeni sürümde CACHE adını değiştir — eski cache otomatik silinir.
+const CACHE = 'kaslog-v2.3';
 const STATIC = [
   './',
   './index.html'
@@ -21,10 +23,15 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   // Sadece GET isteklerini cache'le
   if(e.request.method !== 'GET') return;
-  // API isteklerini cache'leme (Firebase, Gemini vb.)
-  const url = e.request.url;
-  if(url.includes('firestore') || url.includes('googleapis') || url.includes('anthropic')) return;
 
+  const url = e.request.url;
+  // API/dış servis isteklerini cache'leme
+  if(url.includes('firestore') || url.includes('googleapis') ||
+     url.includes('anthropic') || url.includes('openfoodfacts') ||
+     url.includes('/api/')) return;
+
+  // Ağ öncelikli (network-first): çevrimiçiyken HER ZAMAN güncel sürüm gelir,
+  // çevrimdışıyken cache'e düşer.
   e.respondWith(
     fetch(e.request)
       .then(res => {
