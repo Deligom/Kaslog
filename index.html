@@ -999,6 +999,39 @@ canvas{width:100%;height:100%;}
 </div>
 
 <!-- Nutrition Day Detail Modal -->
+<div class="modal-backdrop" id="modal-changelog">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">📋 Neler Yeni</div>
+      <button class="modal-close" onclick="closeModal('modal-changelog')">✕</button>
+    </div>
+    <div class="modal-body" style="font-size:13.5px;line-height:1.65">
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:700;color:var(--accent);margin-bottom:2px">v2.3 beta <span style="font-size:11px;color:var(--text3);font-weight:500">· build 2026-07-30.1</span></div>
+      <ul style="padding-left:18px;margin:0 0 16px;color:var(--text2)">
+        <li>Fotoğraflar gönderilmeden önce 1280px JPEG'e küçültülüyor (proxy boyut hatası düzeldi)</li>
+        <li>Analiz hatalarında gerçek sebep gösteriliyor (boş yanıt / çok büyük / 400 vb.)</li>
+        <li>Hata olunca fotoğraf ve yazı artık silinmiyor</li>
+        <li>Yazım hatası toleransı: "Üpker çokonat" → "Ülker Çokonat" olarak düzeltip yeniden arıyor</li>
+        <li>Sürüm + build damgası eklendi</li>
+      </ul>
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:700;color:var(--text2);margin-bottom:2px">v2.2 beta</div>
+      <ul style="padding-left:18px;margin:0 0 16px;color:var(--text2)">
+        <li>Kademeli besin eşleştirme: kayıtlı ürün → Open Food Facts → AI</li>
+        <li>Barkod tarama (fotoğraftan), etiket okuyup kalıcı öğrenme</li>
+        <li>Hızlı tekrar çipleri (sık yediklerin tek dokunuşla)</li>
+        <li>Öğün düzenleme + yanlış eşleşmeyi silme</li>
+        <li>Gerçek TDEE tahmini (kilo değişimi × kalori)</li>
+        <li>Plato algısı → deload önerisi</li>
+        <li>Set eşleştirme düzeltildi (1. set artık geçen 1. set ile karşılaştırılıyor)</li>
+        <li>Beslenme istatistiğinde ay bazlı sayfalama</li>
+        <li>Yedeklemeye beslenme geçmişi + öğrenilen ürünler dahil edildi</li>
+      </ul>
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px;font-size:12px;color:var(--text3)">
+        Güncellemeyi görmüyorsan: uygulamayı kapat, Chrome'da sayfayı yenile. Build numarası yukarıdakiyle aynıysa güncelsin.
+      </div>
+    </div>
+  </div>
+</div>
 <div class="modal-backdrop" id="modal-nut-edit">
   <div class="modal">
     <div class="modal-header">
@@ -1060,6 +1093,10 @@ canvas{width:100%;height:100%;}
 // ============================================================
 
 // ⚠️  Vercel deploy ettikten sonra kendi URL'ini yaz:
+// ── SÜRÜM DAMGASI ─────────────────────────────────────────────
+// Her yeni build'de BUILD değerini artır. Ayarlar'ın en altında görünür.
+const APP_VERSION = '2.3 beta';
+const APP_BUILD   = '2026-07-30.1';
 const PROXY_URL = 'https://kaslog19.vercel.app/api/gemini';
 
 // ⚠️  Bu değeri Vercel env var'ındaki APP_SECRET ile AYNI yap:
@@ -3104,7 +3141,13 @@ function renderAyarlar(){
       <div class="settings-row" onclick="openAILogModal()"><div class="settings-row-left"><div class="settings-icon si-orange">🤖</div><div><div class="settings-row-title">AI Antrenman Analizi</div><div class="settings-row-sub">Gelişim tablosu, öneriler, PR analizi</div></div></div><div class="settings-row-value"><svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></div></div>
       <div class="settings-row" onclick="clearData()"><div class="settings-row-left"><div class="settings-icon si-red">🗑️</div><div><div class="settings-row-title" style="color:var(--danger)">${T('delete_data')}</div><div class="settings-row-sub">${T('delete_sub')}</div></div></div><div class="settings-row-value"><svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></div></div>
     </div></div>
-    <div style="text-align:center;padding:20px;color:var(--text3);font-size:12px">KASLOG v2.2 beta · Home Workout Tracker</div>
+    <div style="text-align:center;padding:20px 20px 8px;color:var(--text3);font-size:12px">
+      KASLOG v${APP_VERSION} · Home Workout Tracker<br>
+      <span style="font-size:10.5px;opacity:0.75">build ${APP_BUILD}</span>
+    </div>
+    <div style="text-align:center;padding:0 20px 24px">
+      <button onclick="openModal('modal-changelog')" style="background:none;border:none;color:var(--accent);font-size:12px;font-weight:600;cursor:pointer;padding:4px 8px">📋 Neler yeni?</button>
+    </div>
   `;
 }
 
