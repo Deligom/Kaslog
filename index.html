@@ -1006,7 +1006,16 @@ canvas{width:100%;height:100%;}
       <button class="modal-close" onclick="closeModal('modal-changelog')">✕</button>
     </div>
     <div class="modal-body" style="font-size:13.5px;line-height:1.65">
-      <div style="font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:700;color:var(--accent);margin-bottom:2px">v2.3 beta <span style="font-size:11px;color:var(--text3);font-weight:500">· build 2026-07-30.1</span></div>
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:700;color:var(--accent);margin-bottom:2px">v2.4 beta <span style="font-size:11px;color:var(--text3);font-weight:500">· build 2026-08-13.2</span></div>
+      <ul style="padding-left:18px;margin:0 0 16px;color:var(--text2)">
+        <li><b>Öğün rutinleri:</b> aynı öğünü 2. kez girince "rutin yapayım mı?" diye sorar</li>
+        <li>Rutin kayıtlıysa "1 kase gevrek" yazman yeter — tamamı eklenir, yanlışsa "Geri al"</li>
+        <li>Miktarlar her tekrarda ortalamaya çekilir: 250ml ve 240ml girdiysen rutin 245ml olur</li>
+        <li>Günün listesinden öğe seçip elle de rutin yapabilirsin</li>
+        <li>Kısa yazım tam ürünü bulur: "yarım tavuk" → en sık yediğin ürün</li>
+        <li>Proxy güvenliği yeniden kuruldu (hız sınırı + origin kontrolü); ortak kota dolunca kendi key'ine yönlendirir</li>
+      </ul>
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:700;color:var(--text2);margin-bottom:2px">v2.3 beta</div>
       <ul style="padding-left:18px;margin:0 0 16px;color:var(--text2)">
         <li>Fotoğraflar gönderilmeden önce 1280px JPEG'e küçültülüyor (proxy boyut hatası düzeldi)</li>
         <li>Analiz hatalarında gerçek sebep gösteriliyor (boş yanıt / çok büyük / 400 vb.)</li>
@@ -1071,6 +1080,14 @@ canvas{width:100%;height:100%;}
   </div>
 </div>
 
+<!-- Öğün Rutini Düzenle Modal -->
+<div class="modal-backdrop center-dialog" id="modal-routine-edit">
+  <div class="dialog-box" style="max-width:360px;width:93%">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:800;margin-bottom:16px">⭐ Rutini Düzenle</div>
+    <div id="routine-edit-content"></div>
+  </div>
+</div>
+
 <!-- AI Log Analiz Modal -->
 <div class="modal-backdrop" id="modal-ai-log">
   <div class="modal-sheet" style="max-height:92vh">
@@ -1096,7 +1113,7 @@ canvas{width:100%;height:100%;}
 // ── SÜRÜM DAMGASI ─────────────────────────────────────────────
 // Her yeni build'de BUILD değerini artır. Ayarlar'ın en altında görünür.
 const APP_VERSION = '2.4 beta';
-const APP_BUILD   = '2026-08-13.1';
+const APP_BUILD   = '2026-08-13.2';
 const PROXY_URL = 'https://kaslog19.vercel.app/api/gemini';
 
 // GÜVENLİK NOTU (v2.4):
@@ -1176,10 +1193,11 @@ const DB = (() => {
   let db;
   function open() {
     return new Promise((res,rej) => {
-      const req = indexedDB.open('KaslogDB2',3);
+      // v4: mealRoutines eklendi (öğrenilen öğün rutinleri)
+      const req = indexedDB.open('KaslogDB2',4);
       req.onupgradeneeded = e => {
         const d = e.target.result;
-        ['settings','routines','workoutLogs','measurements','customExercises','prs','nutritionLogs','foodDb'].forEach(s => {
+        ['settings','routines','workoutLogs','measurements','customExercises','prs','nutritionLogs','foodDb','mealRoutines'].forEach(s => {
           if (!d.objectStoreNames.contains(s)) d.createObjectStore(s,{keyPath:'id'});
         });
       };
@@ -1532,12 +1550,14 @@ function getDefaultRoutines(level) {
 // STATE
 // ============================================================
 let ST = {
-  settings:{name:'',level:'intermediate',goal:'both',restTime:90,theme:'dark',lang:'tr',cyclePosition:0,lastWorkoutDate:null,activeRoutineId:'routine_default',geminiKey:'',geminiModel:'gemini-3-flash-preview',gender:'male',nutritionGoalKcal:0,nutritionGoalProtein:0,soundEnabled:true,hapticEnabled:true},
+  settings:{name:'',level:'intermediate',goal:'both',restTime:90,theme:'dark',lang:'tr',cyclePosition:0,lastWorkoutDate:null,activeRoutineId:'routine_default',geminiKey:'',geminiModel:'gemini-3-flash-preview',gender:'male',nutritionGoalKcal:0,nutritionGoalProtein:0,soundEnabled:true,hapticEnabled:true,dismissedMealSigs:[]},
   routines:[],
   workoutLogs:[],
   measurements:[],
   customExercises:[],
   nutritionLogs:[],
+  foodDb:[],
+  mealRoutines:[],
   activeTab:'bugun', prs:{},
   workout:null,
 };
@@ -3304,7 +3324,7 @@ function openExportModal(){
 }
 
 function exportData(){
-  const backup={version:'kaslog_v2',exportDate:new Date().toISOString(),settings:ST.settings,routines:ST.routines,workoutLogs:ST.workoutLogs,measurements:ST.measurements,customExercises:ST.customExercises,prs:Object.values(ST.prs),nutritionLogs:ST.nutritionLogs,foodDb:ST.foodDb};
+  const backup={version:'kaslog_v2',exportDate:new Date().toISOString(),settings:ST.settings,routines:ST.routines,workoutLogs:ST.workoutLogs,measurements:ST.measurements,customExercises:ST.customExercises,prs:Object.values(ST.prs),nutritionLogs:ST.nutritionLogs,foodDb:ST.foodDb,mealRoutines:ST.mealRoutines};
   const json=JSON.stringify(backup,null,2);
   const blob=new Blob([json],{type:'application/json'});
   const url=URL.createObjectURL(blob);
@@ -3573,6 +3593,7 @@ async function handleImportFile(input){
     if(backup.prs){for(const p of backup.prs){await DB.put('prs',p);ST.prs[p.exId]=p;}}
     if(backup.nutritionLogs){for(const n of backup.nutritionLogs)await DB.put('nutritionLogs',n);ST.nutritionLogs=backup.nutritionLogs;}
     if(backup.foodDb){for(const f of backup.foodDb)await DB.put('foodDb',f);ST.foodDb=backup.foodDb;}
+    if(backup.mealRoutines){for(const r of backup.mealRoutines)await DB.put('mealRoutines',r);ST.mealRoutines=backup.mealRoutines;}
     closeModal('modal-data');
     renderAll();
     setTimeout(()=>showToast(T('import_success')),300);
@@ -3672,6 +3693,10 @@ function showConfirm(icon,title,msg,onConfirm){
   document.getElementById('alert-title').textContent=title;
   document.getElementById('alert-msg').textContent=msg;
   document.getElementById('alert-confirm').onclick=onConfirm;
+  // Çağıranlar "Vazgeç"e özel işleyici bağlayabiliyor (bkz. _maybeOfferRoutine).
+  // Her açılışta varsayılana döndür, yoksa önceki işleyici sonraki diyaloğa sızar.
+  const cancel=document.getElementById('alert-cancel');
+  if(cancel) cancel.onclick=()=>closeModal('modal-alert');
   openModal('modal-alert');
 }
 document.querySelectorAll('.modal-backdrop').forEach(bd=>{
@@ -4514,8 +4539,22 @@ function renderBeslenme() {
       const chips = Object.values(freq)
         .filter(f => f.count >= 2)
         .sort((a,b) => b.count - a.count).slice(0,5);
-      if (!chips.length) return '';
+
+      // ÖĞRENİLMİŞ RUTİNLER önce gelir: en sık ve en yakın zamanda kullanılan
+      // başta. Tek dokunuşla tüm öğün eklenir.
+      const routines = [...(ST.mealRoutines||[])]
+        .sort((a,b) => (b.useCount||0)-(a.useCount||0) || (b.lastUsedAt||0)-(a.lastUsedAt||0))
+        .slice(0,4);
+
+      if (!chips.length && !routines.length) return '';
       return `<div style="display:flex;gap:6px;overflow-x:auto;padding:2px 20px 6px;-webkit-overflow-scrolling:touch;scrollbar-width:none">
+        ${routines.map(r => {
+          const kcal = Math.round(r.items.reduce((a,i)=>a+(i.calories||0),0));
+          return `<span style="flex-shrink:0;display:inline-flex;align-items:center;border-radius:20px;background:var(--accent-dim);border:1.5px solid var(--accent);white-space:nowrap;overflow:hidden">
+            <button onclick="applyRoutineFromChip('${r.id}')" style="display:inline-flex;align-items:center;gap:5px;padding:7px 4px 7px 12px;background:transparent;border:none;color:var(--accent);font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap">⭐ ${r.name}<span style="opacity:.75;font-weight:500">${kcal}</span></button>
+            <button onclick="openRoutineEdit('${r.id}')" title="Düzenle" style="padding:7px 10px 7px 6px;background:transparent;border:none;color:var(--accent);opacity:.7;font-size:13px;cursor:pointer">⋯</button>
+          </span>`;
+        }).join('')}
         ${chips.map(c => `<button onclick="quickRepeatEntry('${c.latest.id}')" style="flex-shrink:0;display:inline-flex;align-items:center;gap:5px;padding:7px 12px;border-radius:20px;background:var(--surface2);border:1.5px solid var(--border);color:var(--text);font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap">${c.latest.emoji||'🍽️'} ${c.latest.name}<span style="color:var(--text3);font-weight:500">${Math.round(c.latest.calories)}</span></button>`).join('')}
       </div>`;
     })()}
@@ -4530,7 +4569,18 @@ function renderBeslenme() {
     </div>
     ` : ''}
 
-    <div class="section-title" style="padding:0 20px;margin-bottom:12px">BUGÜNKÜ ÖĞÜNLER</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 20px;margin-bottom:12px">
+      <div class="section-title" style="padding:0;margin:0">BUGÜNKÜ ÖĞÜNLER</div>
+      ${entries.filter(e=>!e.pending&&!e.error).length >= 1 ? `
+        <button onclick="toggleRoutineSelectMode()" style="flex-shrink:0;padding:5px 11px;border-radius:20px;font-size:11.5px;font-weight:700;cursor:pointer;background:${_routineSelectMode?'var(--accent)':'var(--surface2)'};color:${_routineSelectMode?'#fff':'var(--text2)'};border:1.5px solid ${_routineSelectMode?'var(--accent)':'var(--border)'}">${_routineSelectMode?'Vazgeç':'⭐ Rutin yap'}</button>
+      ` : ''}
+    </div>
+    ${_routineSelectMode ? `
+      <div style="margin:0 20px 12px;padding:11px 13px;border-radius:12px;background:var(--accent-dim);border:1px solid var(--accent);font-size:12.5px;color:var(--text);line-height:1.5">
+        Rutine girecek öğeleri seç, sonra kaydet. Bir daha yazdığında hepsi birden eklenir.
+        <button onclick="createRoutineFromSelection()" style="display:block;width:100%;margin-top:10px;padding:9px;border-radius:10px;background:var(--accent);color:#fff;border:none;font-size:13px;font-weight:700;cursor:pointer">${_routineSelected.size} öğeyi rutin yap</button>
+      </div>
+    ` : ''}
     <div class="nut-entry-list">
       ${entries.length === 0 ? `
         <div class="nut-empty">
@@ -4548,9 +4598,14 @@ function renderBeslenme() {
         const nameHTML = e.pending
           ? '<span class="nut-entry-queue-dot"></span>' + e.name
           : e.name;
+        // Rutin se\u00E7im modunda sat\u0131r bir se\u00E7im d\u00FC\u011Fmesine d\u00F6n\u00FC\u015F\u00FCr,
+        // d\u00FCzenle/sil gizlenir (yanl\u0131\u015Fl\u0131kla silmeyi \u00F6nler).
+        const selectable = _routineSelectMode && !e.pending && !e.error;
+        const picked = _routineSelected.has(e.id);
         return `
-        <div class="nut-entry${e.pending ? ' pending' : ''}${e.error ? ' error' : ''}">
-          <div class="nut-entry-icon">${e.pending ? '\u23F3' : (e.emoji||'\u{1F37D}')}</div>
+        <div class="nut-entry${e.pending ? ' pending' : ''}${e.error ? ' error' : ''}"
+          ${selectable ? `onclick="toggleRoutineSelection('${e.id}')" style="cursor:pointer${picked?';border-color:var(--accent);background:var(--accent-dim)':''}"` : ''}>
+          <div class="nut-entry-icon">${selectable ? (picked ? '\u2705' : '\u2B1C') : (e.pending ? '\u23F3' : (e.emoji||'\u{1F37D}'))}</div>
           <div class="nut-entry-info">
             <div class="nut-entry-name">${nameHTML}</div>
             <div class="nut-entry-macros">${macroHTML}</div>
@@ -4559,12 +4614,13 @@ function renderBeslenme() {
             ? `<button class="nut-retry-btn" onclick="retryNutritionEntry('${e.id}')">🔄 Tekrar</button>`
             : `<div class="nut-entry-kcal">${e.pending ? '—' : Math.round(e.calories||0)}</div>`
           }
+          ${_routineSelectMode ? '' : `
           ${!e.pending && !e.error ? `<button class="nut-del-btn" onclick="openNutEdit('${e.id}')" title="Düzenle">
             <svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>` : ''}
           <button class="nut-del-btn" onclick="deleteNutritionEntry('${e.id}')">
             <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
-          </button>
+          </button>`}
         </div>`;
       }).join('')}
     </div>
@@ -4576,6 +4632,10 @@ function renderBeslenme() {
     const inputEl = document.getElementById('nut-input');
     if (inputEl) { inputEl.value = savedInput; inputEl.setSelectionRange(savedInput.length, savedInput.length); }
   }
+
+  // Rutin tekrarı kontrolü. Her yeniden çizim zamanlayıcıyı ileri atar, yani
+  // kullanıcı öğününü yazmayı BİTİRDİKTEN sonra bir kez çalışır.
+  _scheduleRoutineCheck();
 }
 
 function setNutDayType(isWorkout) {
@@ -4885,20 +4945,41 @@ function _parseFoodText(text){
   return { qty, grams, product:t };
 }
 
+// Bir ürünün geçmişte kaç kez yendiği. Belirsiz eşleşmede "en sık yediğin"
+// kazansın diye: "yarım tavuk" yazınca sürekli aldığın ürüne gitmeli.
+let _foodFreqCache=null, _foodFreqCacheAt=0;
+function _foodFrequency(){
+  if(_foodFreqCache && Date.now()-_foodFreqCacheAt<30000) return _foodFreqCache;
+  const f={};
+  for(const e of ST.nutritionLogs||[]){
+    if(!e.foodId||e.pending||e.error) continue;
+    f[e.foodId]=(f[e.foodId]||0)+1;
+  }
+  _foodFreqCache=f; _foodFreqCacheAt=Date.now();
+  return f;
+}
+
 // 1. KADEME: Lokal foodDb'de ara (öğrenilmiş ürünler). Basit skorlu eşleşme.
 function _lookupLocalFood(query){
   const q=_foodNorm(query); if(!q||!ST.foodDb?.length) return null;
-  const qWords=q.split(' ');
-  let best=null,bestScore=0;
+  // Miktar/birim kelimeleri eşleşme oranını haksız yere düşürüyordu:
+  // "1 kase gevrek" 3 kelime sayılıp 1/3 skor alıyor ve %75 eşiğini geçemiyordu.
+  const qWords=_routineQueryTokens(q);
+  if(!qWords.length) return null;
+  const freq=_foodFrequency();
+  let best=null,bestScore=0,bestRank=-1;
   for(const f of ST.foodDb){
     const n=f.norm||_foodNorm(f.name);
     if(n===q) return f; // tam eşleşme
-    let score=0;
-    for(const w of qWords) if(w.length>1&&n.includes(w)) score++;
-    score=score/qWords.length;
-    if(score>bestScore){bestScore=score;best=f;}
+    let hit=0;
+    for(const w of qWords) if(n.includes(w)) hit++;
+    const score=hit/qWords.length;
+    if(score<0.75) continue; // kelimelerin ≥%75'i eşleşmeli
+    // Sıklık yalnızca eşiği geçenler arasında SIRALAMA yapar; eşiği düşürmez.
+    const rank=score+Math.min(0.2,(freq[f.id]||0)*0.02);
+    if(rank>bestRank){bestRank=rank;bestScore=score;best=f;}
   }
-  return bestScore>=0.75?best:null; // kelimelerin ≥%75'i eşleşmeli
+  return best;
 }
 
 // 2. KADEME: Open Food Facts isimle ara (TR öncelikli)
@@ -5023,6 +5104,19 @@ async function addNutritionEntry() {
   }
 
   if (!text) return;
+
+  // ÖĞRENİLMİŞ RUTİN: "1 kase gevrek" gibi kısa bir metin kayıtlı bir rutine
+  // benziyorsa AI'ya hiç gitmeden tamamını ekle. Yanlışsa "Geri al" çıkıyor.
+  const routine = _matchMealRoutine(text);
+  if (routine) {
+    input.value = '';
+    const res = await applyMealRoutine(routine.id);
+    if (res) {
+      showActionToast('⭐ ' + res.routine.name + ' eklendi', 'Geri al',
+        () => _undoRoutineApply(res.added, res.routine.id));
+      return;
+    }
+  }
 
   // Hemen listede göster — pending durumda
   const pendingId = 'n_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
@@ -5183,6 +5277,457 @@ async function retryNutritionEntry(id) {
   if (!_nutQueueProcessing) _processNutQueue();
 }
 
+
+// ============================================================
+// ÖĞÜN RUTİNİ MOTORU — öğrenen beslenme
+//
+// Amaç: aynı öğünü ikinci kez girdiğinde sistem bunu fark etsin, rutin
+// yapmayı teklif etsin, sonraki seferlerde tek kelimeyle tamamını eklesin.
+//
+// İşleyiş:
+//   1. nutritionLogs zaman boşluğuna göre "oturum"lara bölünür — 30 dakikadan
+//      uzun boşluk yeni öğün demektir. (Bu pencere aynı öğünün kalemlerini
+//      birbirine bağlamak içindir; tekrarın ne kadar sonra geldiğiyle ilgisi
+//      yoktur, iki gün de olabilir iki ay da.)
+//   2. Oturum imzası = içindeki yiyecek kimliklerinin sıralı kümesi.
+//      MİKTAR İMZAYA GİRMEZ: 250ml süt + 45g gevrek ile 240ml süt + 50g
+//      gevrek aynı rutindir.
+//   3. Aynı imza ikinci kez görülünce "rutin yapayım mı?" diye sorulur.
+//   4. Her tekrarda miktarlar ortalamaya çekilir — sistem senin gerçek
+//      porsiyonunu zamanla öğrenir. Uçuk sapan bir örnek (yarısı/iki katı
+//      dışında) ortalamayı bozmasın diye elenir.
+//   5. Yazdığın kısa metin bir rutine benziyorsa tamamı eklenir. Aday
+//      seçiminde sıklık ve tazelik ağırlık taşır; yanlışsa "Geri al" var.
+// ============================================================
+
+const ROUTINE_SESSION_GAP_MS = 30 * 60 * 1000; // aynı öğün penceresi
+const ROUTINE_MIN_SAMPLES    = 2;              // kaçıncı tekrarda sorulsun
+const ROUTINE_MATCH_MIN      = 0.6;            // eşleşme eşiği (0-1)
+const ROUTINE_AVG_LOW        = 0.5;            // ortalamaya katılacak alt sınır
+const ROUTINE_AVG_HIGH       = 2;              // ve üst sınır (kat olarak)
+
+// Miktar/birim kelimeleri: eşleştirmede anlam taşımaz, elenirler.
+// "yarım tavuk" → ["tavuk"] olur ve "Önder Yarım Ekmek Arası Tavuk"u bulur.
+const ROUTINE_STOPWORDS = new Set([
+  'adet','tane','paket','porsiyon','dilim','kase','bardak','kasik','kaşık',
+  'gr','gram','ml','lt','litre','yarim','buyuk','kucuk','orta','bir','iki','uc',
+  'dort','bes','tam','az','cok','biraz','tabak','kutu','sise','avuc','parca'
+]);
+
+// Bir girişin "hangi yiyecek" olduğunu kimliklendir. Miktar dışarıda kalır.
+function _routineItemKey(e){
+  if(e.foodId) return 'f:'+e.foodId;
+  const n=_foodNorm(e.name||'').replace(/\d+/g,' ').replace(/\s+/g,' ').trim();
+  return n ? 'n:'+n : '';
+}
+
+// Girişleri zaman boşluğuna göre öğün oturumlarına böl (eskiden yeniye)
+function _nutSessions(){
+  const ok=(ST.nutritionLogs||[])
+    .filter(e=>!e.pending && !e.error && e.createdAt && (e.calories||0)>0)
+    .sort((a,b)=>a.createdAt-b.createdAt);
+  const out=[]; let cur=null;
+  for(const e of ok){
+    if(cur && e.date===cur.date && e.createdAt-cur.last<=ROUTINE_SESSION_GAP_MS){
+      cur.entries.push(e); cur.last=e.createdAt;
+    }else{
+      cur={date:e.date,first:e.createdAt,last:e.createdAt,entries:[e]};
+      out.push(cur);
+    }
+  }
+  return out;
+}
+
+function _sessionSignature(entries){
+  const keys=entries.map(_routineItemKey).filter(Boolean);
+  if(!keys.length) return '';
+  return [...new Set(keys)].sort().join('|');
+}
+
+// Saate göre otomatik ad — kullanıcı sonradan değiştirebilir
+function _routineAutoName(ts){
+  const h=new Date(ts||Date.now()).getHours();
+  if(h<11) return 'Kahvaltı rutini';
+  if(h<16) return 'Öğle rutini';
+  if(h<22) return 'Akşam rutini';
+  return 'Gece atıştırması';
+}
+
+// Addaki gramaj/hacmi ayır: "Süt 250ml" → {base:'Süt', qty:250, unit:'ml'}
+// Miktar da ortalanacağı için ad ile değerin tutarsız kalmasını önler
+// (250 ve 240 ölçümünün ortalaması 157 kcal ise ad "Süt 245ml" olmalı).
+function _splitPortionFromName(name){
+  const m=(name||'').match(/^(.*?)[\s(]*(\d+(?:[.,]\d+)?)\s*(ml|lt|l|g|gr|gram)\b\)?\s*$/i);
+  if(!m) return {base:(name||'Öğe').trim(), qty:null, unit:null};
+  let unit=m[3].toLowerCase();
+  if(unit==='gr'||unit==='gram') unit='g';
+  if(unit==='l') unit='lt';
+  const base=m[1].trim().replace(/[(\-–,]\s*$/,'').trim();
+  return {base:base||'Öğe', qty:parseFloat(m[2].replace(',','.')), unit};
+}
+
+function _portionName(base,qty,unit){
+  if(qty==null||!unit) return base;
+  const q=Math.round(qty*10)/10;
+  return base+' '+(Number.isInteger(q)?q:q.toFixed(1))+unit;
+}
+
+// Oturumdaki girişlerden rutin kalemleri üret. Aynı yiyecek iki kez
+// girildiyse tek kaleme toplanır (imza zaten tekilleştiriyor).
+function _routineItemsFromEntries(entries){
+  const items=[];
+  for(const e of entries){
+    const key=_routineItemKey(e); if(!key) continue;
+    const p=_splitPortionFromName(e.name);
+    const ex=items.find(i=>i.key===key);
+    if(ex){
+      ex.calories+=+e.calories||0; ex.protein+=+e.protein||0;
+      ex.carbs+=+e.carbs||0; ex.fat+=+e.fat||0;
+      if(ex.portionQty!=null && p.qty!=null) ex.portionQty+=p.qty;
+      ex.name=_portionName(ex.base,ex.portionQty,ex.portionUnit);
+    }else{
+      items.push({
+        key, foodId:e.foodId||null,
+        base:p.base, portionQty:p.qty, portionUnit:p.unit,
+        name:_portionName(p.base,p.qty,p.unit), emoji:e.emoji||'🍽️',
+        calories:+e.calories||0, protein:+e.protein||0,
+        carbs:+e.carbs||0, fat:+e.fat||0,
+        portionNote:e.portionNote||'', samples:1,
+      });
+    }
+  }
+  return items;
+}
+
+// Yeni bir gözlemi rutinin ortalamasına kat. Porsiyon yarıdan az ya da iki
+// kattan fazla saparsa katma — kullanıcı bambaşka bir miktar yemiş demektir.
+function _mergeRoutineObservation(routine, entries){
+  const fresh=_routineItemsFromEntries(entries);
+  const items=routine.items.map(it=>{
+    const obs=fresh.find(f=>f.key===it.key);
+    if(!obs) return it;
+    const ratio=it.calories>0 ? (obs.calories/it.calories) : 1;
+    if(!(ratio>=ROUTINE_AVG_LOW && ratio<=ROUTINE_AVG_HIGH)) return it; // aykırı
+    const n=it.samples||1, m=n+1;
+    const avg=(cur,val)=>Math.round((((cur*n)+(+val||0))/m)*10)/10;
+    // Gramaj da ortalanır ve ada geri yazılır, yoksa "Süt 240ml" yazıp
+    // 245ml'nin kalorisini gösteren tutarsız bir kalem kalır.
+    const qty=(it.portionQty!=null&&obs.portionQty!=null)
+      ? Math.round(((it.portionQty*n)+obs.portionQty)/m*10)/10
+      : (it.portionQty ?? obs.portionQty ?? null);
+    const unit=it.portionUnit||obs.portionUnit||null;
+    const base=it.base||obs.base;
+    return {...it,
+      base, portionQty:qty, portionUnit:unit,
+      name:_portionName(base,qty,unit),
+      calories:Math.round(((it.calories*n)+(obs.calories))/m),
+      protein:avg(it.protein,obs.protein),
+      carbs:avg(it.carbs,obs.carbs),
+      fat:avg(it.fat,obs.fat),
+      portionNote:obs.portionNote||it.portionNote,
+      samples:m};
+  });
+  return {...routine, items, samples:(routine.samples||1)+1};
+}
+
+// Eşleştirme için sorguyu anlamlı kelimelere indirge
+function _routineQueryTokens(text){
+  return _foodNorm(text).split(' ')
+    .filter(w=>w.length>1 && !ROUTINE_STOPWORDS.has(w) && !/^\d+$/.test(w));
+}
+
+function _routineTokens(r){
+  const s=new Set();
+  const add=str=>{ for(const t of _foodNorm(str||'').split(' ')) if(t.length>1) s.add(t); };
+  add(r.name);
+  for(const it of r.items||[]) add(it.name);
+  return [...s];
+}
+
+/**
+ * Yazılan metne en uygun rutini bul.
+ * Kapı: yazdığın kelimelerin en az %60'ı rutinde geçmeli.
+ * Sıralama: eşleşme oranı + sıklık + tazelik. Belirsizlikte en sık
+ * kullandığın kazanır (kullanıcı tercihi), yanlışsa "Geri al" çıkar.
+ */
+function _matchMealRoutine(text){
+  if(!ST.mealRoutines?.length) return null;
+  const qt=_routineQueryTokens(text);
+  if(!qt.length) return null;
+  const now=Date.now();
+  let best=null,bestScore=0;
+  for(const r of ST.mealRoutines){
+    const toks=_routineTokens(r);
+    if(!toks.length) continue;
+    let hit=0;
+    for(const w of qt) if(toks.some(t=>t.includes(w)||w.includes(t))) hit++;
+    const precision=hit/qt.length;
+    if(precision<ROUTINE_MATCH_MIN) continue;
+    const uses=r.useCount||0;
+    const ageDays=r.lastUsedAt ? (now-r.lastUsedAt)/86400000 : 999;
+    const score=precision
+      + Math.min(0.25, uses*0.03)          // sık kullanılan öne çıkar
+      + (ageDays<14 ? 0.1 : 0);            // yakın zamanda yenmiş öne çıkar
+    if(score>bestScore){ bestScore=score; best=r; }
+  }
+  return best;
+}
+
+// Rutini bugüne uygula. Eklenen giriş id'lerini döner (geri alma için).
+async function applyMealRoutine(routineId){
+  const r=ST.mealRoutines.find(x=>x.id===routineId);
+  if(!r) return null;
+  const added=[];
+  let i=0;
+  for(const it of r.items){
+    const entry={
+      id:'n_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),
+      date:todayDateKey(),
+      name:it.name,
+      calories:Math.round(it.calories||0),
+      protein:Math.round((it.protein||0)*10)/10,
+      carbs:Math.round((it.carbs||0)*10)/10,
+      fat:Math.round((it.fat||0)*10)/10,
+      emoji:it.emoji||'🍽️',
+      portionNote:it.portionNote||'',
+      matchSource:'routine', routineId:r.id,
+      foodId:it.foodId||null, pending:false,
+      createdAt:Date.now()+(i++),   // sıralama korunsun
+    };
+    await DB.put('nutritionLogs',entry);
+    ST.nutritionLogs.push(entry);
+    added.push(entry.id);
+  }
+  const upd={...r, useCount:(r.useCount||0)+1, lastUsedAt:Date.now()};
+  const idx=ST.mealRoutines.findIndex(x=>x.id===r.id);
+  ST.mealRoutines[idx]=upd;
+  await DB.put('mealRoutines',upd);
+  renderBeslenme();
+  return {routine:upd, added};
+}
+
+async function _undoRoutineApply(ids, routineId){
+  for(const id of ids){
+    await DB.del('nutritionLogs',id);
+    ST.nutritionLogs=ST.nutritionLogs.filter(e=>e.id!==id);
+  }
+  // Kullanım sayacını da geri al — yanlış eşleşme sıklığı şişirmesin
+  const idx=ST.mealRoutines.findIndex(x=>x.id===routineId);
+  if(idx!==-1){
+    const r={...ST.mealRoutines[idx], useCount:Math.max(0,(ST.mealRoutines[idx].useCount||1)-1)};
+    ST.mealRoutines[idx]=r;
+    await DB.put('mealRoutines',r);
+  }
+  renderBeslenme();
+  showToast('↩️ Geri alındı');
+}
+
+// Rutini girişlerden oluştur (hem otomatik teklif hem elle seçim kullanır)
+async function _createRoutineFromEntries(entries, name){
+  const items=_routineItemsFromEntries(entries);
+  if(!items.length) return null;
+  const routine={
+    id:'mr_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),
+    name:name||_routineAutoName(entries[0]?.createdAt),
+    sig:_sessionSignature(entries),
+    items, samples:1, useCount:0, lastUsedAt:null,
+    createdAt:Date.now(),
+  };
+  ST.mealRoutines.push(routine);
+  await DB.put('mealRoutines',routine);
+  return routine;
+}
+
+async function deleteMealRoutine(id){
+  await DB.del('mealRoutines',id);
+  ST.mealRoutines=ST.mealRoutines.filter(r=>r.id!==id);
+  renderBeslenme();
+  showToast('🗑️ Rutin silindi');
+}
+
+// ---- Tekrar tespiti ve teklif ----------------------------------
+
+let _routineOfferTimer=null;
+
+// Girişten hemen sonra sormak yanlış olur: kullanıcı hâlâ öğünün diğer
+// kalemlerini yazıyor olabilir. Yazma durduktan sonra değerlendiririz.
+function _scheduleRoutineCheck(delay=45000){
+  clearTimeout(_routineOfferTimer);
+  _routineOfferTimer=setTimeout(()=>{ _maybeOfferRoutine(); }, delay);
+}
+
+async function _maybeOfferRoutine(){
+  const sessions=_nutSessions();
+  if(sessions.length<2) return;
+  const last=sessions[sessions.length-1];
+  const sig=_sessionSignature(last.entries);
+  if(!sig) return;
+
+  // Zaten rutini var mı? Varsa gözlemi ortalamaya kat, tekrar sorma.
+  const existing=ST.mealRoutines.find(r=>r.sig===sig);
+  if(existing){
+    if(last.last>(existing.lastMergedAt||0)){
+      const upd={..._mergeRoutineObservation(existing,last.entries), lastMergedAt:last.last};
+      const idx=ST.mealRoutines.findIndex(r=>r.id===existing.id);
+      ST.mealRoutines[idx]=upd;
+      await DB.put('mealRoutines',upd);
+    }
+    return;
+  }
+
+  // Kullanıcı daha önce "hayır" dediyse bir daha sorma
+  const dismissed=ST.settings.dismissedMealSigs||[];
+  if(dismissed.includes(sig)) return;
+
+  // Aynı imza geçmişte kaç kez görüldü?
+  const seen=sessions.filter(s=>_sessionSignature(s.entries)===sig).length;
+  if(seen<ROUTINE_MIN_SAMPLES) return;
+
+  const items=_routineItemsFromEntries(last.entries);
+  const özet=items.map(i=>i.name).join(' + ');
+  const kcal=Math.round(items.reduce((a,i)=>a+(i.calories||0),0));
+
+  showConfirm('⭐','Bunu rutin yapayım mı?',
+    `${özet} (${kcal} kcal) — ${seen}. kez giriyorsun. Rutin yaparsam bir daha tek kelimeyle ekleyebilirsin.`,
+    async()=>{
+      closeModal('modal-alert');
+      // İlk gözlemi de ortalamaya katmak için geçmişteki eşleşen oturumları birleştir
+      let r=await _createRoutineFromEntries(last.entries);
+      if(!r) return;
+      const others=sessions.filter(s=>_sessionSignature(s.entries)===sig && s!==last);
+      for(const s of others){
+        const idx=ST.mealRoutines.findIndex(x=>x.id===r.id);
+        r=_mergeRoutineObservation(ST.mealRoutines[idx], s.entries);
+        ST.mealRoutines[idx]=r;
+      }
+      r={...r, lastMergedAt:last.last};
+      const idx=ST.mealRoutines.findIndex(x=>x.id===r.id);
+      ST.mealRoutines[idx]=r;
+      await DB.put('mealRoutines',r);
+      renderBeslenme();
+      showToast('⭐ "'+r.name+'" kaydedildi');
+    });
+
+  // "Hayır"a basılırsa bir daha sorulmasın
+  const cancelBtn=document.getElementById('alert-cancel');
+  if(cancelBtn) cancelBtn.onclick=async()=>{
+    closeModal('modal-alert');
+    ST.settings.dismissedMealSigs=[...dismissed,sig].slice(-50);
+    await DB.put('settings',{id:'main',...ST.settings});
+  };
+}
+
+// ---- Eylemli toast (Geri al) -----------------------------------
+
+let _actionToastTimer=null;
+function showActionToast(msg, actionLabel, onAction, ms=6000){
+  let el=document.getElementById('action-toast');
+  if(!el){
+    el=document.createElement('div');
+    el.id='action-toast';
+    el.style.cssText='position:fixed;left:50%;transform:translateX(-50%) translateY(20px);'
+      +'bottom:calc(var(--nav-h) + var(--safe-bot) + 16px);z-index:10000;display:flex;align-items:center;'
+      +'gap:12px;padding:11px 14px;border-radius:14px;background:var(--surface2);border:1px solid var(--border);'
+      +'box-shadow:0 6px 24px rgba(0,0,0,0.35);opacity:0;transition:opacity .25s,transform .25s;'
+      +'max-width:92vw;font-size:13.5px;font-weight:600;color:var(--text)';
+    document.body.appendChild(el);
+  }
+  el.innerHTML='';
+  const txt=document.createElement('span');
+  txt.textContent=msg;
+  txt.style.cssText='flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+  const btn=document.createElement('button');
+  btn.textContent=actionLabel;
+  btn.style.cssText='flex-shrink:0;padding:6px 12px;border-radius:20px;border:1.5px solid var(--accent);'
+    +'background:transparent;color:var(--accent);font-size:12.5px;font-weight:700;cursor:pointer';
+  btn.onclick=async()=>{ hide(); await onAction(); };
+  el.append(txt,btn);
+
+  requestAnimationFrame(()=>{ el.style.opacity='1'; el.style.transform='translateX(-50%) translateY(0)'; });
+  clearTimeout(_actionToastTimer);
+  _actionToastTimer=setTimeout(hide, ms);
+  function hide(){
+    clearTimeout(_actionToastTimer);
+    el.style.opacity='0'; el.style.transform='translateX(-50%) translateY(20px)';
+  }
+}
+
+// ---- Elle rutin oluşturma (günün listesinden seçerek) -----------
+
+let _routineSelectMode=false;
+let _routineSelected=new Set();
+
+function toggleRoutineSelectMode(){
+  _routineSelectMode=!_routineSelectMode;
+  _routineSelected.clear();
+  renderBeslenme();
+}
+
+function toggleRoutineSelection(id){
+  if(_routineSelected.has(id)) _routineSelected.delete(id);
+  else _routineSelected.add(id);
+  renderBeslenme();
+}
+
+async function createRoutineFromSelection(){
+  const entries=getTodayNutrition().filter(e=>_routineSelected.has(e.id) && !e.pending && !e.error);
+  if(!entries.length){ showToast('Önce öğe seç',true); return; }
+  const r=await _createRoutineFromEntries(entries);
+  _routineSelectMode=false; _routineSelected.clear();
+  renderBeslenme();
+  if(r) showToast('⭐ "'+r.name+'" kaydedildi');
+}
+
+// ---- Rutin düzenleme modalı ------------------------------------
+
+let _editRoutineId=null;
+function openRoutineEdit(id){
+  const r=ST.mealRoutines.find(x=>x.id===id); if(!r) return;
+  _editRoutineId=id;
+  const body=document.getElementById('routine-edit-content');
+  const kcal=Math.round(r.items.reduce((a,i)=>a+(i.calories||0),0));
+  body.innerHTML=`
+    <input class="form-input" id="routine-name-input" value="${(r.name||'').replace(/"/g,'&quot;')}" style="font-size:14px;padding:11px 12px;margin-bottom:14px">
+    <div style="font-size:12px;color:var(--text2);margin-bottom:8px">İÇERİK — ${kcal} kcal, ${r.samples||1} ölçümün ortalaması</div>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px">
+      ${r.items.map(i=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:9px 11px;border-radius:10px;background:var(--surface2);font-size:13px">
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${i.emoji||'🍽️'} ${i.name}</span>
+        <span style="color:var(--text2);flex-shrink:0">${Math.round(i.calories||0)} kcal</span>
+      </div>`).join('')}
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-routine-edit')">Vazgeç</button>
+      <button class="btn btn-primary" style="flex:1" onclick="saveRoutineName()">Kaydet</button>
+    </div>
+    <button class="btn btn-danger" style="width:100%;margin-top:8px" onclick="deleteRoutineFromModal()">🗑️ Rutini sil</button>
+  `;
+  openModal('modal-routine-edit');
+}
+
+async function saveRoutineName(){
+  const v=document.getElementById('routine-name-input')?.value?.trim();
+  const idx=ST.mealRoutines.findIndex(r=>r.id===_editRoutineId);
+  if(idx!==-1 && v){
+    ST.mealRoutines[idx]={...ST.mealRoutines[idx],name:v};
+    await DB.put('mealRoutines',ST.mealRoutines[idx]);
+  }
+  closeModal('modal-routine-edit');
+  renderBeslenme();
+}
+
+async function deleteRoutineFromModal(){
+  const id=_editRoutineId;
+  closeModal('modal-routine-edit');
+  await deleteMealRoutine(id);
+}
+
+// Çipe basınca rutini uygula (geri alma seçenekli)
+async function applyRoutineFromChip(id){
+  const res=await applyMealRoutine(id);
+  if(!res) return;
+  showActionToast('⭐ '+res.routine.name+' eklendi','Geri al',
+    ()=>_undoRoutineApply(res.added,res.routine.id));
+}
 
 // HIZLI TEKRAR: geçmiş girişin kopyasını bugüne ekle (AI/API'siz, anında)
 async function quickRepeatEntry(srcId){
@@ -5401,6 +5946,7 @@ async function init(){
   ST.customExercises=await DB.getAll('customExercises');
   ST.nutritionLogs=await DB.getAll('nutritionLogs');
   ST.foodDb=await DB.getAll('foodDb');
+  ST.mealRoutines=await DB.getAll('mealRoutines');
   const allPrs=await DB.getAll('prs');
   allPrs.forEach(p=>{ST.prs[p.exId]=p;});
   // Migrate old PRs from settings store to prs store
