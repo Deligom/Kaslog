@@ -1017,7 +1017,17 @@ canvas{width:100%;height:100%;}
       <button class="modal-close" onclick="closeModal('modal-changelog')">✕</button>
     </div>
     <div class="modal-body" style="font-size:13.5px;line-height:1.65">
-      <div style="font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:700;color:var(--accent);margin-bottom:2px">v2.4 beta <span style="font-size:11px;color:var(--text3);font-weight:500">· build 2026-08-14.1</span></div>
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:700;color:var(--accent);margin-bottom:2px">v2.5 beta <span style="font-size:11px;color:var(--text3);font-weight:500">· build 2026-08-14.2</span></div>
+      <ul style="padding-left:18px;margin:0 0 16px;color:var(--text2)">
+        <li><b>Öğün artık kalemlere ayrılıyor:</b> "250ml süt 50gr gevrek" tek satır yazılsa da süt ve gevrek ayrı kaydediliyor. Listede tek satır görünür, dokununca açılır</li>
+        <li>Rutin ortalaması bileşen bazında: 250ml + 230ml girdiysen rutin "Süt 240ml" olur</li>
+        <li>Rutin tetiği artık senin <b>yazdığın ifadelerden</b> öğreniliyor — tek başına "süt" yazmak kahvaltı rutinini açmıyor</li>
+        <li>Farklı kelimeyle yazsan da bulur: karar analiz isteğinin içinde AI'ya bırakılıyor, ek istek yok</li>
+        <li>Yanlış bulursa <b>⋯</b> tuşuyla kayıtlılardan kendin seçersin (sıklığa veya alfabeye göre)</li>
+        <li><b>Mola sayacı düzeldi:</b> uygulama kapalıyken geçen süre de sayılıyor (eskiden 60 sn sonra donuyordu)</li>
+        <li>Beslenme analizi uygulama kapalıyken arka planda tamamlanmaya çalışıyor (Android)</li>
+      </ul>
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:700;color:var(--text2);margin-bottom:2px">v2.4 beta</div>
       <ul style="padding-left:18px;margin:0 0 16px;color:var(--text2)">
         <li><b>Şınav artık görünüyor:</b> vücut ağırlığı hareketleri hacme, rekora ve grafiğe giriyor (Ayarlar'dan kilonu gir)</li>
         <li><b>Adaptif ilerleme:</b> öneri tek seansa değil, yumuşatılmış güç trendine bakıyor — tek kötü gün seni geriletmiyor</li>
@@ -1113,6 +1123,15 @@ canvas{width:100%;height:100%;}
   </div>
 </div>
 
+<!-- "Bu değil" seçicisi: kayıtlı rutin/ürünlerden elle seçim -->
+<div class="modal-backdrop center-dialog" id="modal-nut-picker">
+  <div class="dialog-box" style="max-width:380px;width:94%">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:800;margin-bottom:14px">🔎 Bunu mu demek istedin?</div>
+    <div id="nut-picker-content"></div>
+    <button class="btn btn-ghost btn-full" style="margin-top:12px" onclick="closeModal('modal-nut-picker')">Vazgeç</button>
+  </div>
+</div>
+
 <!-- Öğün Rutini Düzenle Modal -->
 <div class="modal-backdrop center-dialog" id="modal-routine-edit">
   <div class="dialog-box" style="max-width:360px;width:93%">
@@ -1145,8 +1164,8 @@ canvas{width:100%;height:100%;}
 // ⚠️  Vercel deploy ettikten sonra kendi URL'ini yaz:
 // ── SÜRÜM DAMGASI ─────────────────────────────────────────────
 // Her yeni build'de BUILD değerini artır. Ayarlar'ın en altında görünür.
-const APP_VERSION = '2.4 beta';
-const APP_BUILD   = '2026-08-14.1';
+const APP_VERSION = '2.5 beta';
+const APP_BUILD   = '2026-08-14.2';
 const PROXY_URL = 'https://kaslog19.vercel.app/api/gemini';
 
 // GÜVENLİK NOTU (v2.4):
@@ -1226,11 +1245,12 @@ const DB = (() => {
   let db;
   function open() {
     return new Promise((res,rej) => {
-      // v4: mealRoutines eklendi (öğrenilen öğün rutinleri)
-      const req = indexedDB.open('KaslogDB2',4);
+      // v4: mealRoutines (öğrenilen öğün rutinleri)
+      // v5: nutQueue (service worker'ın arka planda göndereceği AI istekleri)
+      const req = indexedDB.open('KaslogDB2',5);
       req.onupgradeneeded = e => {
         const d = e.target.result;
-        ['settings','routines','workoutLogs','measurements','customExercises','prs','nutritionLogs','foodDb','mealRoutines'].forEach(s => {
+        ['settings','routines','workoutLogs','measurements','customExercises','prs','nutritionLogs','foodDb','mealRoutines','nutQueue'].forEach(s => {
           if (!d.objectStoreNames.contains(s)) d.createObjectStore(s,{keyPath:'id'});
         });
       };
@@ -2211,7 +2231,7 @@ async function deleteLibExercise(exId) {
 // ACTIVE WORKOUT
 // ============================================================
 let woTimer=null, woRestTimer=null, woStartTime=null, woElapsed=0;
-let _restRemaining=0, _restDuration=0;
+let _restRemaining=0, _restDuration=0, _restEndsAt=null;
 const restC=2*Math.PI*88;
 
 function startWorkout(routineId,dayId) {
@@ -2401,6 +2421,11 @@ function skipExercise(){
 function startRestTimer(duration,nextEx){
   const d=duration??ST.settings.restTime;
   _restDuration=d; _restRemaining=d;
+  // Sayaç TİK saymaz, GEÇEN ZAMANI ölçer. Tarayıcı arka plandaki sekmenin
+  // zamanlayıcılarını ~60 sn sonra donduruyor; eskiden 60 saniye sayıp
+  // duruyordu ve uygulama açılınca kaldığı yerden devam ediyordu.
+  // Bitiş anını mutlak zaman olarak tutunca kapalıyken geçen süre de sayılır.
+  _restEndsAt=Date.now()+d*1000;
   setWoPhase('rest');
   const lbl=document.getElementById('rest-phase-label');
   if(lbl)lbl.textContent=T('rest_title');
@@ -2415,31 +2440,50 @@ function startRestTimer(duration,nextEx){
   nextExEl.textContent=nextEx?nextEx.exData.name:'—';
   countdown.textContent=_restRemaining;
   if(woRestTimer)clearInterval(woRestTimer);
-  woRestTimer=setInterval(()=>{
-    _restRemaining--;
-    const frac=Math.max(0,_restRemaining/_restDuration);
-    circle.style.strokeDashoffset=restC*(1-frac);
-    countdown.textContent=Math.max(0,_restRemaining);
-    // Color warning: yellow at 30%, red at 10%
-    if(_restRemaining<=Math.ceil(_restDuration*0.1)){
-      circle.style.stroke='var(--danger)';
-      countdown.style.color='var(--danger)';
-      countdown.style.animation='restPulse 0.5s ease-in-out infinite';
-    } else if(_restRemaining<=Math.ceil(_restDuration*0.3)){
-      circle.style.stroke='var(--warning)';
-      countdown.style.color='var(--warning)';
-      countdown.style.animation='';
-    } else {
-      circle.style.stroke='var(--accent)';
-      countdown.style.color='var(--text)';
-      countdown.style.animation='';
-    }
-    if(_restRemaining<=0){clearInterval(woRestTimer);SFX.restEnd();skipRest();}
-  },1000);
+  woRestTimer=setInterval(_tickRest,250); // 250ms: geri dönüşte ekran hemen düzelsin
+  _tickRest();
 }
+
+// Kalan süreyi mutlak bitiş anından hesaplar. Kaç kez çağrıldığı önemsiz.
+function _tickRest(){
+  if(!_restEndsAt) return;
+  const circle=document.getElementById('rest-circle');
+  const countdown=document.getElementById('rest-countdown');
+  if(!circle||!countdown) return;
+  _restRemaining=Math.max(0,Math.ceil((_restEndsAt-Date.now())/1000));
+  const frac=Math.max(0,_restRemaining/_restDuration);
+  circle.style.strokeDashoffset=restC*(1-frac);
+  countdown.textContent=_restRemaining;
+  // Color warning: yellow at 30%, red at 10%
+  if(_restRemaining<=Math.ceil(_restDuration*0.1)){
+    circle.style.stroke='var(--danger)';
+    countdown.style.color='var(--danger)';
+    countdown.style.animation='restPulse 0.5s ease-in-out infinite';
+  } else if(_restRemaining<=Math.ceil(_restDuration*0.3)){
+    circle.style.stroke='var(--warning)';
+    countdown.style.color='var(--warning)';
+    countdown.style.animation='';
+  } else {
+    circle.style.stroke='var(--accent)';
+    countdown.style.color='var(--text)';
+    countdown.style.animation='';
+  }
+  if(_restRemaining<=0){
+    clearInterval(woRestTimer); woRestTimer=null; _restEndsAt=null;
+    SFX.restEnd(); skipRest();
+  }
+}
+
+// Uygulamaya dönüldüğünde ekranı anında tazele — donmuş sayı görünmesin
+document.addEventListener('visibilitychange',()=>{
+  if(!document.hidden && _restEndsAt && ST.workout?.phase==='rest') _tickRest();
+});
+
 function adjRestTimer(delta){
   _restRemaining=Math.max(5,_restRemaining+delta);
   _restDuration=Math.max(_restDuration,_restRemaining);
+  // Bitiş anını da kaydır, yoksa bir sonraki tikte eski değere geri döner
+  _restEndsAt=Date.now()+_restRemaining*1000;
   const countdown=document.getElementById('rest-countdown');
   if(countdown)countdown.textContent=_restRemaining;
   showToast((delta>0?'+':'')+delta+'s');
@@ -2447,6 +2491,7 @@ function adjRestTimer(delta){
 
 function skipRest(){
   if(woRestTimer)clearInterval(woRestTimer);
+  woRestTimer=null; _restEndsAt=null;
   const w=ST.workout; if(!w)return;
   if(w.exIndex>=w.exercises.length){showSummary();return;}
   setWoPhase('exercise'); renderWoExercise();
@@ -2469,6 +2514,7 @@ function setWoPhase(phase){
 
 function showSummary(){
   if(woRestTimer)clearInterval(woRestTimer);
+  woRestTimer=null; _restEndsAt=null;
   setWoPhase('summary');
   const w=ST.workout;
   const duration=Math.floor((Date.now()-w.startTime)/60000);
@@ -2652,7 +2698,7 @@ function discardWorkout(){
 function closeWorkout(){
   if(woTimer)clearInterval(woTimer);
   if(woRestTimer)clearInterval(woRestTimer);
-  woTimer=null; woRestTimer=null; ST.workout=null; woElapsed=0;
+  woTimer=null; woRestTimer=null; _restEndsAt=null; ST.workout=null; woElapsed=0;
   document.getElementById('workout-overlay').classList.remove('open');
 }
 
@@ -4891,49 +4937,7 @@ function renderBeslenme() {
         <button onclick="createRoutineFromSelection()" style="display:block;width:100%;margin-top:10px;padding:9px;border-radius:10px;background:var(--accent);color:#fff;border:none;font-size:13px;font-weight:700;cursor:pointer">${_routineSelected.size} öğeyi rutin yap</button>
       </div>
     ` : ''}
-    <div class="nut-entry-list">
-      ${entries.length === 0 ? `
-        <div class="nut-empty">
-          <div class="nut-empty-icon">🥗</div>
-          <div class="nut-empty-text">Henüz öğün girilmedi.<br>Yukarıya ne yediğini yaz.</div>
-        </div>
-      ` : entries.map(e => {
-        const macroHTML = e.pending
-          ? '<span class="nut-entry-macro" style="color:var(--text3);font-style:italic">⏳ AI analiz ediyor...</span>'
-          : e.error
-          ? '<span class="nut-entry-macro" style="color:var(--danger)">⚠️ ' + (e.errMsg || 'Analiz başarısız — tekrar dene') + '</span>'
-          : '<span class="nut-entry-macro">\u{1F969} ' + Math.round(e.protein||0) + 'g protein</span>' +
-            '<span class="nut-entry-macro">\u{1F33E} ' + Math.round(e.carbs||0) + 'g karb</span>' +
-            '<span class="nut-entry-macro">\u{1F9C8} ' + Math.round(e.fat||0) + 'g yağ</span>';
-        const nameHTML = e.pending
-          ? '<span class="nut-entry-queue-dot"></span>' + e.name
-          : e.name;
-        // Rutin se\u00E7im modunda sat\u0131r bir se\u00E7im d\u00FC\u011Fmesine d\u00F6n\u00FC\u015F\u00FCr,
-        // d\u00FCzenle/sil gizlenir (yanl\u0131\u015Fl\u0131kla silmeyi \u00F6nler).
-        const selectable = _routineSelectMode && !e.pending && !e.error;
-        const picked = _routineSelected.has(e.id);
-        return `
-        <div class="nut-entry${e.pending ? ' pending' : ''}${e.error ? ' error' : ''}"
-          ${selectable ? `onclick="toggleRoutineSelection('${e.id}')" style="cursor:pointer${picked?';border-color:var(--accent);background:var(--accent-dim)':''}"` : ''}>
-          <div class="nut-entry-icon">${selectable ? (picked ? '\u2705' : '\u2B1C') : (e.pending ? '\u23F3' : (e.emoji||'\u{1F37D}'))}</div>
-          <div class="nut-entry-info">
-            <div class="nut-entry-name">${nameHTML}</div>
-            <div class="nut-entry-macros">${macroHTML}</div>
-          </div>
-          ${e.error
-            ? `<button class="nut-retry-btn" onclick="retryNutritionEntry('${e.id}')">🔄 Tekrar</button>`
-            : `<div class="nut-entry-kcal">${e.pending ? '—' : Math.round(e.calories||0)}</div>`
-          }
-          ${_routineSelectMode ? '' : `
-          ${!e.pending && !e.error ? `<button class="nut-del-btn" onclick="openNutEdit('${e.id}')" title="Düzenle">
-            <svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-          </button>` : ''}
-          <button class="nut-del-btn" onclick="deleteNutritionEntry('${e.id}')">
-            <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
-          </button>`}
-        </div>`;
-      }).join('')}
-    </div>
+    <div class="nut-entry-list">${_nutListHTML(entries)}</div>
     <div style="height:20px"></div>
   `;
 
@@ -5415,13 +5419,15 @@ async function addNutritionEntry() {
 
   if (!text) return;
 
-  // ÖĞRENİLMİŞ RUTİN: "1 kase gevrek" gibi kısa bir metin kayıtlı bir rutine
-  // benziyorsa AI'ya hiç gitmeden tamamını ekle. Yanlışsa "Geri al" çıkıyor.
-  const routine = _matchMealRoutine(text);
-  if (routine) {
+  // ÖĞRENİLMİŞ RUTİN — KESİN eşleşme: anında uygula, AI'ya hiç gitme.
+  // Belirsiz eşleşmede burada karar VERİLMEZ; kuyrukta AI'ya sorulur, çünkü
+  // ağ turu sürerken kullanıcıyı boş ekranda bekletmek istemiyoruz.
+  const { match } = _matchMealRoutine(text);
+  if (match) {
     input.value = '';
-    const res = await applyMealRoutine(routine.id);
+    const res = await applyMealRoutine(match.id);
     if (res) {
+      await _learnRoutineTrigger(match.id, text);
       showActionToast('⭐ ' + res.routine.name + ' eklendi', 'Geri al',
         () => _undoRoutineApply(res.added, res.routine.id));
       return;
@@ -5445,9 +5451,158 @@ async function addNutritionEntry() {
   input.value = '';
   renderBeslenme();
 
-  // Kuyruğa ekle ve işle
+  // Kuyruğa ekle ve işle. Aynı isteği service worker'a da bırak: uygulama
+  // kapanırsa analiz arka planda tamamlansın, açılınca hazır olsun.
   _nutQueue.push({ text, pendingId });
+  _enqueueBgJob(pendingId, text);
   if (!_nutQueueProcessing) _processNutQueue();
+}
+
+// ---- Arka plan kuyruğu (service worker ile) --------------------
+// Uygulama kapatıldığında JavaScript durur; bu değiştirilemez. Yapılabilen
+// şey, isteği service worker'ın göndermesi: Gemini'nin 5-30 saniyelik yanıt
+// süresi uygulama kapalıyken geçer, açtığında sonuç hazır olur.
+// Chrome/Android'de çalışır, iOS Safari'de Background Sync yoktur.
+// Çalışmazsa hiçbir şey kaybolmaz — sayfa açılınca normal akış devreye girer.
+
+function _nutTextPrompt(text){
+  // Kayıtlı rutinler AYNI isteğe iliştirilir. Ayrı bir "hangi rutin?" çağrısı
+  // yapmak yerine, zaten yapılan analiz çağrısında sorulur: ek maliyet yok,
+  // üstelik model bağlamı görerek karar verir. Kelime benzerliği sıfır olsa
+  // bile ("sabah gevreğim") doğru rutini bulabilir.
+  const rs=(ST.mealRoutines||[]).slice(0,12);
+  const routineBlock = rs.length ? `
+Kullanıcının kayıtlı öğün rutinleri:
+${rs.map(r=>`- id=${r.id} | ad="${r.name}" | içerik: ${r.items.map(i=>i.name).join(', ')} | daha önce şöyle yazmıştı: ${(r.triggers||[]).map(t=>`"${t}"`).join(', ')||'—'}`).join('\n')}
+
+Bu giriş yukarıdaki rutinlerden BİRİNİ kastediyorsa routineId alanına o id'yi yaz.
+Farklı kelimeler kullanmış olabilir — anlamı değerlendir, kelime benzerliğine takılma.
+Ama rutinin sadece BİR parçasını yazmışsa (rutin süt+gevrek iken sadece "süt" gibi)
+routineId null olsun: tek bir yiyecek kastediyordur. Emin değilsen null.
+` : '';
+  return `Sen bir beslenme uzmanısın. Kullanıcının yazdığı yiyeceği/öğünü analiz et.
+${routineBlock}
+Kurallar:
+1. SADECE JSON döndür. Markdown yok, açıklama yok, kod bloğu yok.
+2. Şema: {"name":"string","emoji":"string","productQuery":"string|null","routineId":"string|null","items":[{"name":"string","kcal":number,"protein":number,"carbs":number,"fat":number,"emoji":"string"}]}
+3. items: Girişteki HER AYRI YİYECEK için bir kalem. "250ml süt 50gr gevrek" → 2 kalem.
+   Tek yiyecek varsa tek kalemlik dizi döndür.
+4. items[].name: Türkçe isim + miktar (örn: "Süt 250ml", "Kahvaltılık Gevrek 50g").
+   Marka belirtilmişse başa ekle (örn: "Kellogg's Kahvaltılık Gevrek 50g").
+5. items[] değerleri o kalemin GERÇEK miktarı için — 100g baz DEĞİL.
+6. name: öğünün kısa toplu adı (örn: "Sütlü Gevrek"). emoji: öğün için tek emoji.
+7. productQuery: Girişte YAZIM HATASI olabilir. Markalı paketli TEK bir ürünse doğru marka+ürün adını yaz (örn "Üpker çokonat maxi" → "Ülker Çokonat Maxi"). Birden fazla yiyecek varsa veya ev yemeğiyse null.
+Giriş: "${text}"
+SADECE JSON:`;
+}
+
+// callGemini ile AYNI isteği kur — service worker sadece POST edebilsin diye
+function _nutGeminiRequest(text){
+  const model=ST.settings.geminiModel||'gemini-2.5-flash';
+  const contents=[{parts:[{text:_nutTextPrompt(text)}]}];
+  const key=ST.settings.geminiKey?.trim();
+  if(key) return { url:`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+                   body:{contents,generationConfig:NUT_GEN_CFG} };
+  return { url:PROXY_URL, body:{model,contents,generationConfig:NUT_GEN_CFG} };
+}
+
+async function _enqueueBgJob(pendingId, text){
+  try{
+    const {url,body}=_nutGeminiRequest(text);
+    await DB.put('nutQueue',{ id:'q_'+pendingId, pendingId, text, url, body,
+      status:'pending', createdAt:Date.now() });
+    const reg=await navigator.serviceWorker?.ready;
+    if(reg?.sync) await reg.sync.register('kaslog-nut-queue');
+  }catch{ /* destek yoksa sessizce geç — sayfa akışı zaten çalışıyor */ }
+}
+
+async function _dropBgJob(pendingId){
+  try{ await DB.del('nutQueue','q_'+pendingId); }catch{}
+}
+
+// Arka planda tamamlanmış işleri sonuçlandır
+async function _drainBgJobs(){
+  let jobs=[];
+  try{ jobs=await DB.getAll('nutQueue'); }catch{ return; }
+  let changed=false;
+  for(const j of jobs){
+    const idx=ST.nutritionLogs.findIndex(e=>e.id===j.pendingId);
+    // Kayıt yoksa ya da sayfa zaten tamamladıysa iş gereksiz
+    if(idx===-1 || !ST.nutritionLogs[idx].pending){ await DB.del('nutQueue',j.id); continue; }
+    if(j.status!=='done'){
+      // 6 saatten eski ve hâlâ bitmemişse bırak, sayfa normal akışta halleder
+      if(Date.now()-(j.createdAt||0)>6*3600000) await DB.del('nutQueue',j.id);
+      continue;
+    }
+    try{
+      const parsed=_extractJson(_geminiText(JSON.parse(j.response)));
+      if(!(await _applyRoutineIfPicked(parsed, j.pendingId, j.text)))
+        await _writeParsedMeal(j.pendingId, parsed, j.text);
+      changed=true;
+    }catch{ /* yanıt bozuk: işi sil, sayfa akışı yeniden dener */ }
+    await DB.del('nutQueue',j.id);
+  }
+  if(changed) renderBeslenme();
+}
+
+// "250ml süt 50gr gevrek" gibi birden fazla miktar işareti taşıyan satırda
+// tek ürün araması yanlış eşleşme üretir — doğrudan kalem ayrıştırmasına git.
+function _looksMultiFood(text){
+  const m=(text||'').match(/\d+(?:[.,]\d+)?\s*(?:g|gr|gram|ml|lt|litre|adet|tane|dilim|kase|bardak|porsiyon)\b/gi);
+  return !!m && m.length>=2;
+}
+
+/**
+ * Gemini yanıtını öğün kayıtlarına yaz.
+ * Tek kalemse bekleyen kayıt güncellenir. Birden fazlaysa kalemler AYRI
+ * kayıtlar olarak yazılır ama ortak bir groupId paylaşır: listede tek satır
+ * gibi görünürler, dokununca açılırlar. Rutin ortalaması bileşen düzeyinde
+ * ancak böyle çalışabiliyor.
+ * Model şemaya uymayıp eski toplu biçimi dönerse ona da düşer.
+ */
+async function _writeParsedMeal(pendingId, parsed, rawText){
+  const idx = ST.nutritionLogs.findIndex(e => e.id === pendingId);
+  if (idx === -1) return;
+  const base = ST.nutritionLogs[idx];
+
+  let items = Array.isArray(parsed.items) ? parsed.items.filter(i => i && (i.kcal || i.name)) : [];
+  if (!items.length) {
+    items = [{ name: parsed.name || rawText, kcal: parsed.totalKcal, protein: parsed.totalProtein,
+               carbs: parsed.totalCarbs, fat: parsed.totalFat, emoji: parsed.emoji }];
+  }
+
+  const mk = (it, i) => ({
+    id: i === 0 ? base.id : 'n_' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
+    date: base.date,
+    name: it.name || rawText,
+    calories: Math.round(+it.kcal || 0),
+    protein: Math.round((+it.protein || 0) * 10) / 10,
+    carbs:   Math.round((+it.carbs   || 0) * 10) / 10,
+    fat:     Math.round((+it.fat     || 0) * 10) / 10,
+    emoji: it.emoji || parsed.emoji || '🍽️',
+    portionNote: '~AI tahmini',
+    matchSource: 'ai',
+    raw: rawText,
+    pending: false,
+    createdAt: (base.createdAt || Date.now()) + i,
+  });
+
+  if (items.length === 1) {
+    const up = { ...base, ...mk(items[0], 0) };
+    ST.nutritionLogs[idx] = up;
+    await DB.put('nutritionLogs', up);
+    return;
+  }
+
+  const groupId = 'g_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
+  const groupName = parsed.name || rawText;
+  const rows = items.map((it, i) => ({ ...mk(it, i), groupId, groupName }));
+  ST.nutritionLogs[idx] = rows[0];
+  await DB.put('nutritionLogs', rows[0]);
+  for (let i = 1; i < rows.length; i++) {
+    ST.nutritionLogs.push(rows[i]);
+    await DB.put('nutritionLogs', rows[i]);
+  }
 }
 
 async function _processNutQueue() {
@@ -5457,7 +5612,11 @@ async function _processNutQueue() {
 
   try {
     // ---- KADEME 1-2: Lokal DB → Open Food Facts (sıfır AI hatası) ----
-    const resolved = await _cascadeResolveText(text);
+    // Rutin adayı varsa lokal aramayı ATLA: yoksa foodDb tek bir ürünü kapıp
+    // rutini gölgeler ve AI'nın karar verme şansı hiç doğmaz.
+    const { candidates } = _matchMealRoutine(text);
+    const skipCascade = _looksMultiFood(text) || candidates.length > 0;
+    const resolved = skipCascade ? null : await _cascadeResolveText(text);
     if (resolved) {
       const idx = ST.nutritionLogs.findIndex(e => e.id === pendingId);
       if (idx !== -1) {
@@ -5479,16 +5638,11 @@ async function _processNutQueue() {
     }
 
     // ---- KADEME 3: Gemini tahmini (yaklaşık değer) ----
-    const prompt = `Sen bir beslenme uzmanısın. Kullanıcının yazdığı yiyeceği/öğünü analiz et.
-Kurallar:
-1. SADECE JSON döndür. Markdown yok, açıklama yok, kod bloğu yok.
-2. Şema: {"name":"string","totalKcal":number,"totalProtein":number,"totalCarbs":number,"totalFat":number,"emoji":"string","productQuery":"string|null"}
-3. name: Türkçe isim. Gramaj belirtilmişse ekle (örn: "Tavuk Göğsü (200g)").
-4. Değerler GERÇEK TOPLAM — 100g baz değil. Birden fazla yiyecek varsa hepsini hesapla ve topla.
-5. Tek uygun emoji.
-6. productQuery: Girişte YAZIM HATASI olabilir. Markalı paketli tek bir ürünse doğru marka+ürün adını yaz (örn "Üpker çokonat maxi" → "Ülker Çokonat Maxi"). Ev yemeği/tabak/birden fazla yiyecekse null.
-Giriş: "${text}"
-SADECE JSON:`;
+    // ÖNEMLİ: Artık toplam DEĞİL, KALEM KALEM isteniyor. "250ml süt 50gr gevrek"
+    // tek satır yazılsa bile süt ve gevrek ayrı kalemler olarak dönüyor.
+    // Rutin ortalaması ancak böyle bileşen düzeyinde çalışabiliyor
+    // (250→230ml süt ortalaması, 50→40g gevrek ortalaması).
+    const prompt = _nutTextPrompt(text);
 
     const data = await callGemini([{ parts: [{ text: prompt }] }], null, NUT_GEN_CFG);
     if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
@@ -5518,23 +5672,17 @@ SADECE JSON:`;
       }
     }
 
-    const idx = ST.nutritionLogs.findIndex(e => e.id === pendingId);
-    if (idx !== -1) {
-      const updated = {
-        ...ST.nutritionLogs[idx],
-        name:     parsed.name     || text,
-        calories: Math.round(parsed.totalKcal    || 0),
-        protein:  Math.round((parsed.totalProtein || 0) * 10) / 10,
-        carbs:    Math.round((parsed.totalCarbs   || 0) * 10) / 10,
-        fat:      Math.round((parsed.totalFat     || 0) * 10) / 10,
-        emoji:    parsed.emoji || '🍽️',
-        portionNote: '~AI tahmini',
-        matchSource: 'ai',
-        pending:  false,
-      };
-      ST.nutritionLogs[idx] = updated;
-      await DB.put('nutritionLogs', updated);
+    // Model bunun kayıtlı bir rutin olduğunu söylediyse rutini uygula
+    if (await _applyRoutineIfPicked(parsed, pendingId, text)) {
+      await _dropBgJob(pendingId);
+      renderBeslenme();
+      await new Promise(r => setTimeout(r, 100));
+      _processNutQueue();
+      return;
     }
+
+    await _writeParsedMeal(pendingId, parsed, text);
+    await _dropBgJob(pendingId);   // sayfa hallettiyse arka plan işi gereksiz
   } catch(err) {
     const idx = ST.nutritionLogs.findIndex(e => e.id === pendingId);
     if (idx !== -1) {
@@ -5612,7 +5760,6 @@ async function retryNutritionEntry(id) {
 
 const ROUTINE_SESSION_GAP_MS = 30 * 60 * 1000; // aynı öğün penceresi
 const ROUTINE_MIN_SAMPLES    = 2;              // kaçıncı tekrarda sorulsun
-const ROUTINE_MATCH_MIN      = 0.6;            // eşleşme eşiği (0-1)
 const ROUTINE_AVG_LOW        = 0.5;            // ortalamaya katılacak alt sınır
 const ROUTINE_AVG_HIGH       = 2;              // ve üst sınır (kat olarak)
 
@@ -5638,10 +5785,16 @@ function _nutSessions(){
     .sort((a,b)=>a.createdAt-b.createdAt);
   const out=[]; let cur=null;
   for(const e of ok){
-    if(cur && e.date===cur.date && e.createdAt-cur.last<=ROUTINE_SESSION_GAP_MS){
+    // Tek satırda yazılan öğün (aynı groupId) TAM OLARAK bir oturumdur —
+    // 5 dakika sonra yenen salata ona karışmasın. groupId yoksa eski
+    // 30 dakika kuralı geçerli.
+    const sameGroup   = cur && e.groupId && cur.groupId===e.groupId;
+    const withinWindow= cur && !e.groupId && !cur.groupId &&
+                        e.date===cur.date && e.createdAt-cur.last<=ROUTINE_SESSION_GAP_MS;
+    if(sameGroup || withinWindow){
       cur.entries.push(e); cur.last=e.createdAt;
     }else{
-      cur={date:e.date,first:e.createdAt,last:e.createdAt,entries:[e]};
+      cur={date:e.date,first:e.createdAt,last:e.createdAt,groupId:e.groupId||null,entries:[e]};
       out.push(cur);
     }
   }
@@ -5740,47 +5893,110 @@ function _mergeRoutineObservation(routine, entries){
   return {...routine, items, samples:(routine.samples||1)+1};
 }
 
-// Eşleştirme için sorguyu anlamlı kelimelere indirge
+// Eşleştirme için sorguyu anlamlı kelimelere indirge.
+// Miktar taşıyan her şey elenir: "250ml", "50gr", "2" gibi tokenlar ürünün
+// kimliği değil, ölçüsüdür — kaldıkça kapsama oranını sulandırıp gerçek
+// eşleşmeleri eşiğin altına düşürüyorlardı. Tekrarlar da teklileştirilir.
 function _routineQueryTokens(text){
-  return _foodNorm(text).split(' ')
-    .filter(w=>w.length>1 && !ROUTINE_STOPWORDS.has(w) && !/^\d+$/.test(w));
+  const out=[];
+  for(const w of _foodNorm(text).split(' ')){
+    if(w.length<2) continue;
+    if(/^\d/.test(w)) continue;              // "250ml", "50gr", "3" ...
+    if(ROUTINE_STOPWORDS.has(w)) continue;   // adet, kase, yarim ...
+    if(!out.includes(w)) out.push(w);
+  }
+  return out;
 }
 
-function _routineTokens(r){
-  const s=new Set();
-  const add=str=>{ for(const t of _foodNorm(str||'').split(' ')) if(t.length>1) s.add(t); };
-  add(r.name);
-  for(const it of r.items||[]) add(it.name);
-  return [...s];
-}
 
 /**
  * Yazılan metne en uygun rutini bul.
- * Kapı: yazdığın kelimelerin en az %60'ı rutinde geçmeli.
- * Sıralama: eşleşme oranı + sıklık + tazelik. Belirsizlikte en sık
- * kullandığın kazanır (kullanıcı tercihi), yanlışsa "Geri al" çıkar.
+ *
+ * Eşleştirme rutinin İÇERİĞİNE değil, kullanıcının GERÇEKTEN YAZDIĞI
+ * ifadelere (tetiklere) bakar. Eskiden içerik kelimeleriyle örtüşme
+ * aranıyordu ve tek başına "süt" yazmak tüm kahvaltı rutinini getiriyordu —
+ * çünkü "süt" rutinin içindeydi. Artık tetik olarak öğrenilmemiş bir
+ * kelime tek başına rutini açamaz.
+ *
+ * İki yönlü ölçü:
+ *   coverage — yazdığın kelimeler tetiğin ne kadarını karşılıyor
+ *   precision — yazdıklarının ne kadarı tetikte geçiyor
+ * İkisi de yüksekse kesin eşleşme (anında, AI yok).
+ * Zayıfsa aday listesi döner; karar AI'ya bırakılır.
+ *
+ * @returns {{match:object|null, candidates:object[]}}
  */
 function _matchMealRoutine(text){
-  if(!ST.mealRoutines?.length) return null;
+  const empty={match:null,candidates:[]};
+  if(!ST.mealRoutines?.length) return empty;
   const qt=_routineQueryTokens(text);
-  if(!qt.length) return null;
+  if(!qt.length) return empty;
   const now=Date.now();
-  let best=null,bestScore=0;
+  const scored=[];
+
   for(const r of ST.mealRoutines){
-    const toks=_routineTokens(r);
-    if(!toks.length) continue;
-    let hit=0;
-    for(const w of qt) if(toks.some(t=>t.includes(w)||w.includes(t))) hit++;
-    const precision=hit/qt.length;
-    if(precision<ROUTINE_MATCH_MIN) continue;
+    const triggers=(r.triggers?.length?r.triggers:[r.name]).map(_routineQueryTokens).filter(t=>t.length);
+    if(!triggers.length) continue;
+
+    let bestCov=0,bestPrec=0;
+    for(const tt of triggers){
+      const hitQ=qt.filter(w=>tt.some(t=>t.includes(w)||w.includes(t))).length;
+      const hitT=tt.filter(t=>qt.some(w=>t.includes(w)||w.includes(t))).length;
+      const prec=hitQ/qt.length;      // yazdıklarının ne kadarı tanındı
+      const cov =hitT/tt.length;      // tetiğin ne kadarı karşılandı
+      if(prec+cov>bestPrec+bestCov){ bestPrec=prec; bestCov=cov; }
+    }
+    if(bestPrec===0) continue;        // hiç ilgisi yok
+
     const uses=r.useCount||0;
-    const ageDays=r.lastUsedAt ? (now-r.lastUsedAt)/86400000 : 999;
-    const score=precision
-      + Math.min(0.25, uses*0.03)          // sık kullanılan öne çıkar
-      + (ageDays<14 ? 0.1 : 0);            // yakın zamanda yenmiş öne çıkar
-    if(score>bestScore){ bestScore=score; best=r; }
+    const ageDays=r.lastUsedAt?(now-r.lastUsedAt)/86400000:999;
+    scored.push({ routine:r, prec:bestPrec, cov:bestCov,
+      rank:bestPrec+bestCov+Math.min(0.25,uses*0.03)+(ageDays<14?0.1:0) });
   }
-  return best;
+  if(!scored.length) return empty;
+  scored.sort((a,b)=>b.rank-a.rank);
+
+  // Kesin eşleşme: yazdıklarının hepsi tanındı VE tetiğin yarısını karşıladı
+  const top=scored[0];
+  const confident = top.prec>=0.99 && top.cov>=0.5;
+  // İkinci aday çok yakınsa "kesin" deme, AI karar versin
+  const ambiguous = scored.length>1 && (scored[0].rank-scored[1].rank)<0.15;
+
+  if(confident && !ambiguous) return { match:top.routine, candidates:scored.map(s=>s.routine) };
+  return { match:null, candidates:scored.slice(0,6).map(s=>s.routine) };
+}
+
+/**
+ * Analiz yanıtında model "bu şu rutin" dediyse rutini uygula.
+ * Rutin kararı ayrı bir çağrıda değil, zaten yapılan analiz çağrısında
+ * alınıyor — ek maliyet yok. Uygulandıysa true döner.
+ */
+async function _applyRoutineIfPicked(parsed, pendingId, text){
+  const id=parsed?.routineId;
+  if(!id || !ST.mealRoutines.some(r=>r.id===id)) return false;
+  await DB.del('nutritionLogs', pendingId);
+  ST.nutritionLogs=ST.nutritionLogs.filter(e=>e.id!==pendingId);
+  const res=await applyMealRoutine(id);
+  if(!res) return false;
+  await _learnRoutineTrigger(id, text);   // bir dahakine AI'sız bulsun
+  showActionToast('⭐ '+res.routine.name+' eklendi','Geri al',
+    ()=>_undoRoutineApply(res.added,res.routine.id));
+  return true;
+}
+
+// Kullanıcının yazdığı ifadeyi rutine tetik olarak ekle — sistem böylece
+// senin kelimelerini öğrenir, kendi tahminini değil.
+async function _learnRoutineTrigger(routineId, rawText){
+  const idx=ST.mealRoutines.findIndex(r=>r.id===routineId);
+  if(idx===-1||!rawText) return;
+  const norm=_foodNorm(rawText);
+  if(!norm) return;
+  const r=ST.mealRoutines[idx];
+  const triggers=r.triggers||[];
+  if(triggers.some(t=>_foodNorm(t)===norm)) return;
+  const upd={...r, triggers:[...triggers, rawText].slice(-8)};
+  ST.mealRoutines[idx]=upd;
+  await DB.put('mealRoutines',upd);
 }
 
 // Rutini bugüne uygula. Eklenen giriş id'lerini döner (geri alma için).
@@ -5836,11 +6052,14 @@ async function _undoRoutineApply(ids, routineId){
 async function _createRoutineFromEntries(entries, name){
   const items=_routineItemsFromEntries(entries);
   if(!items.length) return null;
+  // Tetikler kullanıcının GERÇEKTEN yazdığı ifadelerden doğar. Rutin
+  // içeriğinden türetmek "süt" yazınca tüm kahvaltının gelmesine yol açıyordu.
+  const triggers=[...new Set(entries.map(e=>e.raw).filter(Boolean))].slice(0,4);
   const routine={
     id:'mr_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),
     name:name||_routineAutoName(entries[0]?.createdAt),
     sig:_sessionSignature(entries),
-    items, samples:1, useCount:0, lastUsedAt:null,
+    items, triggers, samples:1, useCount:0, lastUsedAt:null,
     createdAt:Date.now(),
   };
   ST.mealRoutines.push(routine);
@@ -5893,18 +6112,34 @@ async function _maybeOfferRoutine(){
   const seen=sessions.filter(s=>_sessionSignature(s.entries)===sig).length;
   if(seen<ROUTINE_MIN_SAMPLES) return;
 
-  const items=_routineItemsFromEntries(last.entries);
+  // Önizleme SON girişi değil, tüm ölçümlerin ORTALAMASINI göstermeli —
+  // kullanıcıya "kaydedeceğim değerler bunlar" demiş oluyoruz.
+  const matching=sessions.filter(s=>_sessionSignature(s.entries)===sig);
+  let preview={items:_routineItemsFromEntries(matching[0].entries), samples:1};
+  for(let i=1;i<matching.length;i++) preview=_mergeRoutineObservation(preview, matching[i].entries);
+  const items=preview.items;
   const özet=items.map(i=>i.name).join(' + ');
   const kcal=Math.round(items.reduce((a,i)=>a+(i.calories||0),0));
 
   showConfirm('⭐','Bunu rutin yapayım mı?',
-    `${özet} (${kcal} kcal) — ${seen}. kez giriyorsun. Rutin yaparsam bir daha tek kelimeyle ekleyebilirsin.`,
+    `${özet} — toplam ${kcal} kcal. ${seen}. kez giriyorsun; bunlar ölçümlerinin ortalaması. `
+    + `Rutine ne kadar çok veri girersen ortalaman o kadar isabetli olur. `
+    + `Kaydedersem bir daha tek kelimeyle ekleyebilirsin.`,
     async()=>{
       closeModal('modal-alert');
       // İlk gözlemi de ortalamaya katmak için geçmişteki eşleşen oturumları birleştir
       let r=await _createRoutineFromEntries(last.entries);
       if(!r) return;
       const others=sessions.filter(s=>_sessionSignature(s.entries)===sig && s!==last);
+      // Tetikleri HER oturumdan topla. Sadece son girişten almak, kullanıcının
+      // ilk gün yazdığı ("kahvaltılık gevrek") ifadeyi kaybettiriyordu ve
+      // sistem kendi öğrettiği kelimeyi tanımıyordu.
+      {
+        const raws=[...new Set(matching.flatMap(s=>s.entries.map(e=>e.raw)).filter(Boolean))].slice(0,6);
+        const i0=ST.mealRoutines.findIndex(x=>x.id===r.id);
+        ST.mealRoutines[i0]={...ST.mealRoutines[i0], triggers:raws};
+        r=ST.mealRoutines[i0];
+      }
       for(const s of others){
         const idx=ST.mealRoutines.findIndex(x=>x.id===r.id);
         r=_mergeRoutineObservation(ST.mealRoutines[idx], s.entries);
@@ -6037,6 +6272,180 @@ async function applyRoutineFromChip(id){
   if(!res) return;
   showActionToast('⭐ '+res.routine.name+' eklendi','Geri al',
     ()=>_undoRoutineApply(res.added,res.routine.id));
+}
+
+// ---- Öğün listesi çizimi ---------------------------------------
+// Tek satırda yazılan çok kalemli öğün ayrı kayıtlar olarak saklanır ama
+// ortak groupId ile TEK satır gibi görünür; dokununca kalemler açılır.
+let _expandedNutGroups = new Set();
+
+function toggleNutGroup(gid){
+  if(_expandedNutGroups.has(gid)) _expandedNutGroups.delete(gid);
+  else _expandedNutGroups.add(gid);
+  renderBeslenme();
+}
+
+function _nutMacroHTML(e){
+  if(e.pending) return '<span class="nut-entry-macro" style="color:var(--text3);font-style:italic">⏳ AI analiz ediyor...</span>';
+  if(e.error)   return '<span class="nut-entry-macro" style="color:var(--danger)">⚠️ '+(e.errMsg||'Analiz başarısız — tekrar dene')+'</span>';
+  return '<span class="nut-entry-macro">🥩 '+Math.round(e.protein||0)+'g protein</span>'
+       + '<span class="nut-entry-macro">🌾 '+Math.round(e.carbs||0)+'g karb</span>'
+       + '<span class="nut-entry-macro">🧈 '+Math.round(e.fat||0)+'g yağ</span>';
+}
+
+const _svgEdit = '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+const _svgDel  = '<svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>';
+
+function _nutEntryRowHTML(e, nested){
+  const selectable=_routineSelectMode && !e.pending && !e.error;
+  const picked=_routineSelected.has(e.id);
+  const nameHTML=e.pending?'<span class="nut-entry-queue-dot"></span>'+e.name:e.name;
+  const attrs = selectable
+    ? `onclick="toggleRoutineSelection('${e.id}')" style="cursor:pointer${picked?';border-color:var(--accent);background:var(--accent-dim)':''}"`
+    : (nested?'style="margin-left:16px"':'');
+  return `<div class="nut-entry${e.pending?' pending':''}${e.error?' error':''}" ${attrs}>
+    <div class="nut-entry-icon">${selectable?(picked?'✅':'⬜'):(e.pending?'⏳':(e.emoji||'🍽️'))}</div>
+    <div class="nut-entry-info">
+      <div class="nut-entry-name">${nameHTML}</div>
+      <div class="nut-entry-macros">${_nutMacroHTML(e)}</div>
+    </div>
+    ${e.error
+      ? `<button class="nut-retry-btn" onclick="retryNutritionEntry('${e.id}')">🔄 Tekrar</button>`
+      : `<div class="nut-entry-kcal">${e.pending?'—':Math.round(e.calories||0)}</div>`}
+    ${_routineSelectMode?'':`
+      ${!e.pending&&!e.error?`<button class="nut-del-btn" onclick="openNutPicker('${e.id}')" title="Bu değil — kayıtlılardan seç" style="font-size:17px;letter-spacing:1px">⋯</button>
+      <button class="nut-del-btn" onclick="openNutEdit('${e.id}')" title="Düzenle">${_svgEdit}</button>`:''}
+      <button class="nut-del-btn" onclick="deleteNutritionEntry('${e.id}')">${_svgDel}</button>`}
+  </div>`;
+}
+
+function _nutGroupRowHTML(items){
+  const gid=items[0].groupId;
+  // Rutin seçim modunda kalemler tek tek işaretlenebilmeli — hep açık göster
+  const open=_expandedNutGroups.has(gid) || _routineSelectMode;
+  const kcal=Math.round(items.reduce((a,e)=>a+(e.calories||0),0));
+  const sum=k=>Math.round(items.reduce((a,e)=>a+(e[k]||0),0));
+  const name=items[0].groupName||items.map(i=>i.name).join(' + ');
+  const anyPending=items.some(e=>e.pending);
+  const head=`<div class="nut-entry" onclick="toggleNutGroup('${gid}')" style="cursor:pointer">
+    <div class="nut-entry-icon">${items[0].emoji||'🍽️'}</div>
+    <div class="nut-entry-info">
+      <div class="nut-entry-name">${name} <span style="color:var(--text3);font-weight:500;font-size:12px">· ${items.length} kalem</span></div>
+      <div class="nut-entry-macros">
+        <span class="nut-entry-macro">🥩 ${sum('protein')}g protein</span>
+        <span class="nut-entry-macro">🌾 ${sum('carbs')}g karb</span>
+        <span class="nut-entry-macro">🧈 ${sum('fat')}g yağ</span>
+      </div>
+    </div>
+    <div class="nut-entry-kcal">${anyPending?'—':kcal}</div>
+    <button class="nut-del-btn" onclick="event.stopPropagation();openNutPicker('${items[0].id}')" title="Bu değil — kayıtlılardan seç" style="font-size:17px;letter-spacing:1px">⋯</button>
+    <button class="nut-del-btn" style="transform:rotate(${open?90:0}deg);transition:transform .2s">
+      <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+    </button>
+  </div>`;
+  if(!open) return head;
+  return head + items.map(e=>_nutEntryRowHTML(e,true)).join('');
+}
+
+function _nutListHTML(entries){
+  if(!entries.length) return `
+    <div class="nut-empty">
+      <div class="nut-empty-icon">🥗</div>
+      <div class="nut-empty-text">Henüz öğün girilmedi.<br>Yukarıya ne yediğini yaz.</div>
+    </div>`;
+  const out=[]; const seen=new Set();
+  for(const e of entries){
+    if(e.groupId){
+      if(seen.has(e.groupId)) continue;
+      seen.add(e.groupId);
+      out.push(_nutGroupRowHTML(entries.filter(x=>x.groupId===e.groupId)));
+    } else out.push(_nutEntryRowHTML(e,false));
+  }
+  return out.join('');
+}
+
+// ---- "Bu değil" seçicisi (⋯) -----------------------------------
+// Kullanıcı sistemin bulduğunu beğenmezse kayıtlılardan kendi seçer.
+let _pickerForId=null, _pickerSort='freq';
+
+function openNutPicker(entryId){
+  _pickerForId=entryId;
+  _renderNutPicker();
+  openModal('modal-nut-picker');
+}
+
+function setNutPickerSort(s){ _pickerSort=s; _renderNutPicker(); }
+
+function _renderNutPicker(){
+  const e=ST.nutritionLogs.find(x=>x.id===_pickerForId);
+  const freq=_foodFrequency();
+  const routines=[...(ST.mealRoutines||[])].map(r=>({
+    kind:'routine', id:r.id, name:r.name,
+    kcal:Math.round(r.items.reduce((a,i)=>a+(i.calories||0),0)),
+    sub:r.items.map(i=>i.name).join(' + '),
+    score:(r.useCount||0)+(r.samples||0),
+  }));
+  const foods=[...(ST.foodDb||[])].map(f=>({
+    kind:'food', id:f.id, name:f.name,
+    kcal:Math.round(f.per100?.kcal||0),
+    sub:'100g başına',
+    score:freq[f.id]||0,
+  }));
+  let list=[...routines,...foods];
+  if(_pickerSort==='alpha') list.sort((a,b)=>a.name.localeCompare(b.name,'tr'));
+  else list.sort((a,b)=>b.score-a.score || a.name.localeCompare(b.name,'tr'));
+  list=list.slice(0,80);
+
+  const btn=(s,label)=>`<button onclick="setNutPickerSort('${s}')" style="flex:1;padding:7px;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;background:${_pickerSort===s?'var(--accent)':'var(--surface2)'};color:${_pickerSort===s?'#fff':'var(--text2)'};border:1.5px solid ${_pickerSort===s?'var(--accent)':'var(--border)'}">${label}</button>`;
+
+  document.getElementById('nut-picker-content').innerHTML=`
+    <div style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.5">
+      Şu an: <b style="color:var(--text)">${e?e.name:'—'}</b><br>Doğrusunu seç, kayıt bununla değiştirilsin.
+    </div>
+    <div style="display:flex;gap:6px;margin-bottom:12px">${btn('freq','⭐ En çok kullanılan')}${btn('alpha','🔤 Alfabetik')}</div>
+    ${list.length?`<div style="display:flex;flex-direction:column;gap:6px;max-height:52vh;overflow-y:auto">
+      ${list.map(it=>`<button onclick="applyNutPick('${it.kind}','${it.id}')" style="display:flex;align-items:center;gap:10px;padding:10px 11px;border-radius:10px;background:var(--surface2);border:1.5px solid ${it.kind==='routine'?'var(--accent)':'var(--border)'};cursor:pointer;text-align:left;width:100%">
+        <span style="font-size:15px;flex-shrink:0">${it.kind==='routine'?'⭐':'📗'}</span>
+        <span style="flex:1;min-width:0">
+          <span style="display:block;font-size:13px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${it.name}</span>
+          <span style="display:block;font-size:11px;color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${it.sub}</span>
+        </span>
+        <span style="font-size:12px;color:var(--text2);flex-shrink:0">${it.kcal} kcal</span>
+      </button>`).join('')}
+    </div>`:`<div style="font-size:13px;color:var(--text3);padding:16px 0;text-align:center">Henüz kayıtlı rutin veya ürün yok.</div>`}
+  `;
+}
+
+async function applyNutPick(kind, id){
+  const e=ST.nutritionLogs.find(x=>x.id===_pickerForId);
+  if(!e){ closeModal('modal-nut-picker'); return; }
+  const raw=e.raw||e.name;
+  // Yanlış kaydı (grubun tamamını) kaldır
+  const doomed=e.groupId ? ST.nutritionLogs.filter(x=>x.groupId===e.groupId) : [e];
+  for(const d of doomed){ await DB.del('nutritionLogs',d.id); ST.nutritionLogs=ST.nutritionLogs.filter(x=>x.id!==d.id); }
+  closeModal('modal-nut-picker');
+
+  if(kind==='routine'){
+    const res=await applyMealRoutine(id);
+    if(res){
+      // Kullanıcının yazdığı ifadeyi bu rutine tetik olarak öğret —
+      // bir dahakine kendisi bulsun.
+      await _learnRoutineTrigger(id, raw);
+      showToast('⭐ '+res.routine.name+' uygulandı');
+    }
+    return;
+  }
+  const food=ST.foodDb.find(f=>f.id===id);
+  if(!food){ renderBeslenme(); return; }
+  const {qty,grams}=_parseFoodText(raw);
+  const mac=_foodToMacros(food,qty,grams);
+  const entry={ id:'n_'+Date.now()+'_'+Math.random().toString(36).slice(2,6), date:todayDateKey(),
+    name:food.name+(qty!==1?' ×'+qty:''), calories:mac.calories, protein:mac.protein,
+    carbs:mac.carbs, fat:mac.fat, emoji:'📗', portionNote:mac.portionNote,
+    matchSource:'manual', foodId:food.id, raw, pending:false, createdAt:Date.now() };
+  await DB.put('nutritionLogs',entry); ST.nutritionLogs.push(entry);
+  renderBeslenme();
+  showToast('📗 '+food.name);
 }
 
 // HIZLI TEKRAR: geçmiş girişin kopyasını bugüne ekle (AI/API'siz, anında)
@@ -6257,6 +6666,13 @@ async function init(){
   ST.nutritionLogs=await DB.getAll('nutritionLogs');
   ST.foodDb=await DB.getAll('foodDb');
   ST.mealRoutines=await DB.getAll('mealRoutines');
+
+  // Uygulama kapalıyken tamamlanmış AI analizleri varsa hemen sonuçlandır
+  _drainBgJobs();
+  navigator.serviceWorker?.addEventListener('message', e => {
+    if(e.data?.type==='nut-queue-flushed') _drainBgJobs();
+  });
+  document.addEventListener('visibilitychange',()=>{ if(!document.hidden) _drainBgJobs(); });
   const allPrs=await DB.getAll('prs');
   allPrs.forEach(p=>{ST.prs[p.exId]=p;});
   // Migrate old PRs from settings store to prs store
