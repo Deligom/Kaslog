@@ -1095,36 +1095,17 @@ canvas{width:100%;height:100%;}
 // ⚠️  Vercel deploy ettikten sonra kendi URL'ini yaz:
 // ── SÜRÜM DAMGASI ─────────────────────────────────────────────
 // Her yeni build'de BUILD değerini artır. Ayarlar'ın en altında görünür.
-const APP_VERSION = '2.3 beta';
-const APP_BUILD   = '2026-07-30.1';
+const APP_VERSION = '2.4 beta';
+const APP_BUILD   = '2026-08-13.1';
 const PROXY_URL = 'https://kaslog19.vercel.app/api/gemini';
 
-// ⚠️  Bu değeri Vercel env var'ındaki APP_SECRET ile AYNI yap:
-//     Vercel Dashboard → Settings → Environment Variables → APP_SECRET
-const APP_SECRET = '3f8a2b9c1d4e5f607890ab1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f708192a3b4';
-
-// HMAC-SHA256 imzası — Web Crypto API (native, kütüphane yok)
-async function _signPayload(payload) {
-  const timestamp = Date.now();
-  // 16 byte kriptografik rastgele nonce
-  const nonceBytes = new Uint8Array(16);
-  crypto.getRandomValues(nonceBytes);
-  const nonce = Array.from(nonceBytes).map(b => b.toString(16).padStart(2,'0')).join('');
-
-  const message = `${timestamp}:${nonce}:${JSON.stringify(payload)}`;
-  const keyMaterial = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(APP_SECRET),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
-  const sigBuf = await crypto.subtle.sign('HMAC', keyMaterial, new TextEncoder().encode(message));
-  const signature = Array.from(new Uint8Array(sigBuf))
-    .map(b => b.toString(16).padStart(2,'0')).join('');
-
-  return { timestamp, nonce, signature };
-}
+// GÜVENLİK NOTU (v2.4):
+//   Burada eskiden APP_SECRET vardı ve proxy'ye HMAC imzalı istek atılıyordu.
+//   Ancak istemci kodu herkese açık olduğu için o sır da herkese açıktı —
+//   imza hiçbir şey kanıtlamıyordu. Kaldırıldı.
+//   Kötüye kullanım artık sunucuda engelleniyor: origin beyaz listesi,
+//   IP başına hız sınırı ve global günlük tavan (bkz. api/gemini.js).
+//   Ortak kota dolduğunda kullanıcı kendi key'ini girmeye yönlendirilir.
 
 // Gemini çağrısı — kişisel key varsa direkt, yoksa güvenli proxy
 // JSON bekleyen çağrılar için: düşünme bütçesini kapat, JSON modunu aç.
@@ -1148,30 +1129,38 @@ async function callGemini(contents, model, genCfg) {
     return resp.json();
   }
 
-  // Proxy üzerinden — HMAC imzalı istek
+  // Proxy üzerinden — ortak kota. Sır yok; koruma sunucu tarafında.
   const useCfg = !!(genCfg && _genCfgSupported);
   const payload = useCfg ? { model, contents, generationConfig: genCfg } : { model, contents };
-  const { timestamp, nonce, signature } = await _signPayload(payload);
 
   const resp = await fetch(PROXY_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ payload, timestamp, nonce, signature }),
+    body: JSON.stringify(payload),
   });
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({}));
     let errMsg = typeof err.error === 'string' ? err.error : (err.error?.message || err.message || '');
+    const code = err.code || '';
+
+    // Kota bitti → kullanıcıya kendi key'ini girmesini söyleyeceğiz.
+    // Üç ayrı durum aynı çözüme çıkar: kişisel key gir.
+    if (code === 'RATE_LIMIT_GLOBAL' || code === 'RATE_LIMIT_UPSTREAM') errMsg = 'SHARED_QUOTA_OUT';
+    else if (code === 'RATE_LIMIT_IP') errMsg = 'RATE_LIMIT_IP:' + (err.retryAfter || 0);
+    else if (code === 'ORIGIN_DENIED') errMsg = 'ORIGIN_DENIED';
+    else if (code === 'TOO_LARGE' || resp.status === 413) errMsg = 'too large';
     // Proxy'den gelen İngilizce sistem mesajlarını Türkçeleştir
-    if (!errMsg || errMsg.includes('high demand') || errMsg.includes('overloaded') || resp.status === 503 || resp.status === 529)
+    else if (!errMsg || errMsg.includes('high demand') || errMsg.includes('overloaded') || resp.status === 503 || resp.status === 529)
       errMsg = 'high demand'; // Üst katmanda yakalanacak
     else if (resp.status === 429 || errMsg.includes('quota') || errMsg.includes('RESOURCE_EXHAUSTED'))
-      errMsg = 'quota exceeded';
+      errMsg = 'SHARED_QUOTA_OUT';
     else if (resp.status === 401 || resp.status === 403)
       errMsg = 'API_KEY invalid';
     else
       errMsg = errMsg || `Proxy hatası (${resp.status})`;
-    // Proxy generationConfig'i kabul etmiyorsa: kalıcı kapat ve configsiz tekrar dene
-    if (useCfg && (resp.status === 400 || resp.status === 422 || /invalid|unexpected|unknown|signature/i.test(errMsg))) {
+    // Eski bir proxy sürümü hâlâ ayaktaysa generationConfig'i reddedebilir.
+    // Tanımadığımız bir 400 gelirse configsiz bir kez daha dene.
+    if (useCfg && resp.status === 400 && !code) {
       _genCfgSupported = false;
       return callGemini(contents, model, null);
     }
@@ -3085,8 +3074,11 @@ function renderAyarlar(){
     <div class="page-pad" style="padding-bottom:12px;padding-top:4px"><div class="section-title">🍽️ BESLENME</div></div>
     <div class="settings-section"><div class="settings-block">
       <div class="settings-row" style="flex-direction:column;align-items:stretch;gap:8px;cursor:default">
-        <div class="settings-row-left"><div class="settings-icon si-orange">🤖</div><div><div class="settings-row-title">Gemini API Key</div><div class="settings-row-sub">Opsiyonel — boş bırakırsan proxy kullanılır</div></div></div>
-        <div style="font-size:11px;padding:7px 10px;border-radius:8px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);color:var(--success)">🔒 Proxy aktif — key gerekmeden AI analizi çalışıyor</div>
+        <div class="settings-row-left"><div class="settings-icon si-orange">🤖</div><div><div class="settings-row-title">Gemini API Key</div><div class="settings-row-sub">${s.geminiKey?.trim() ? 'Kendi key\'in kullanılıyor — sınır yok' : 'Opsiyonel — boş bırakırsan ortak kota kullanılır'}</div></div></div>
+        ${s.geminiKey?.trim()
+          ? `<div style="font-size:11px;padding:7px 10px;border-radius:8px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);color:var(--success)">🔑 Kendi key'in aktif — istekler doğrudan Google'a gidiyor, ortak kotadan düşmüyor</div>`
+          : `<div style="font-size:11px;padding:7px 10px;border-radius:8px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);color:var(--success)">🔒 Ortak kota aktif — key girmeden AI analizi çalışıyor</div>
+             <div style="font-size:11px;padding:7px 10px;border-radius:8px;background:var(--surface2);border:1px solid var(--border);color:var(--text2);line-height:1.5">Ortak kota herkesle paylaşılıyor; yoğun günlerde dolabilir veya yavaşlayabilir. Kendi <b>ücretsiz</b> key'ini girersen bu sınırlar sana işlemez.<br><a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" style="color:var(--accent);font-weight:600">aistudio.google.com/apikey →</a></div>`}
         <input class="form-input" id="gemini-key-input" type="password" placeholder="Kendi key'ini girmek istersen: AIza..." value="${s.geminiKey||''}" style="font-size:13px;padding:10px 12px;" onchange="saveGeminiKey(this.value)">
       </div>
       <div class="settings-row" style="flex-direction:column;align-items:stretch;gap:8px;cursor:default">
@@ -4699,6 +4691,15 @@ function _extractJson(raw) {
 // ---- Hata mesajını insan diline çevir ----
 function _nutErrMsg(err) {
   const m = err?.message || '';
+  // Ortak kota bitti → çözüm kendi key'ini girmek. Ayarlar'a yönlendir.
+  if (m.includes('SHARED_QUOTA_OUT'))
+    return '🔋 Ortak AI kotası doldu — Ayarlar\'dan kendi ücretsiz Gemini key\'ini gir';
+  if (m.startsWith('RATE_LIMIT_IP')) {
+    const secs = parseInt(m.split(':')[1], 10) || 0;
+    const mins = Math.ceil(secs / 60);
+    return '🚦 Çok hızlı gittin — ' + (mins > 60 ? 'yarın' : mins + ' dk sonra') + ' tekrar dene';
+  }
+  if (m.includes('ORIGIN_DENIED')) return '🔒 Bu adresten AI erişimi kapalı — uygulamayı resmi adresinden aç';
   if (m.includes('EMPTY_MAX_TOKENS')) return '🧠 Model yanıtı yarıda kesildi — tekrar dene';
   if (m.includes('EMPTY_SAFETY'))     return '🚫 Model bu görseli analiz etmedi — başka açıdan çek';
   if (m.includes('EMPTY_RESPONSE'))   return '📭 Model boş yanıt verdi — tekrar dene';
