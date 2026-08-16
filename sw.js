@@ -1,6 +1,6 @@
 // Kaslog Service Worker
 // ÖNEMLİ: Her yeni sürümde CACHE adını değiştir — eski cache otomatik silinir.
-const CACHE = 'kaslog-v2.4';
+const CACHE = 'kaslog-v2.4.1';
 const STATIC = [
   './',
   './index.html'
