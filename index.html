@@ -553,6 +553,10 @@ canvas{width:100%;height:100%;}
 .nut-bar-carbs{background:var(--warning);}
 .nut-add-wrap{margin:0 20px 16px;position:relative;}
 .nut-add-input{width:100%;background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:13px 94px 13px 16px;font-size:15px;color:var(--text);transition:var(--transition);}
+/* Rutin seçici düğmesi varken metin alanı bir düğme daha sığdıracak kadar daralır */
+.nut-add-wrap.has-star .nut-add-input{padding-right:136px;}
+.nut-star-btn{position:absolute;right:92px;top:50%;transform:translateY(-50%);width:36px;height:36px;border-radius:10px;background:var(--surface2);border:1.5px solid var(--accent);display:flex;align-items:center;justify-content:center;font-size:17px;transition:var(--transition);cursor:pointer;}
+.nut-star-btn:active{transform:translateY(-50%) scale(0.9);background:var(--accent-dim);}
 .nut-add-input:focus{border-color:var(--accent);outline:none;background:var(--surface);}
 .nut-add-input::placeholder{color:var(--text3);}
 .nut-add-btn{position:absolute;right:8px;top:50%;transform:translateY(-50%);width:36px;height:36px;border-radius:10px;background:var(--accent);display:flex;align-items:center;justify-content:center;transition:var(--transition);}
@@ -1021,8 +1025,15 @@ canvas{width:100%;height:100%;}
       <button class="modal-close" onclick="closeModal('modal-changelog')">✕</button>
     </div>
     <div class="modal-body" style="font-size:13.5px;line-height:1.65">
-      <div style="font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:700;color:var(--accent);margin-bottom:2px">v2.5 beta <span style="font-size:11px;color:var(--text3);font-weight:500">· build 2026-08-17.1</span></div>
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:700;color:var(--accent);margin-bottom:2px">v2.5 beta <span style="font-size:11px;color:var(--text3);font-weight:500">· build 2026-08-17.2</span></div>
       <ul style="padding-left:18px;margin:0 0 16px;color:var(--text2)">
+        <li><b>Tek girişten iki öğün</b> hatası giderildi (analiz iki kez gönderiliyordu)</li>
+        <li>Açık miktar yazınca ("240ml süt") rutin dayatılmıyor; yazdığın değer geçerli ve ortalamaya katılıyor</li>
+        <li>Öğün kartında silme tuşu; artık alt kalemleri tek tek silmek gerekmiyor</li>
+        <li>Rutin seçim modunda yiyecek ikonları görünüyor, ana kart tek dokunuşla seçilebiliyor</li>
+        <li>Öğünlerin saati listede görünüyor</li>
+        <li>⭐ tuşu: rutinlerin arasında arama yaparak seç (çip kaydırmaya gerek yok)</li>
+        <li>Rutin güncellenince bildirim çıkıyor</li>
         <li>Ayarlar'da Chrome'un "kaydedilen şifre" panelini açan hata giderildi</li>
         <li>Rutin tanıma Türkçe eklere dayanıklı: "gevrek" ile "gevreği" artık aynı sayılıyor</li>
         <li>Öğün satırında ikon artık öğünün kendi ikonu; uzun adlar kesilmiyor</li>
@@ -1130,6 +1141,15 @@ canvas{width:100%;height:100%;}
   </div>
 </div>
 
+<!-- Rutinlerim: aramalı liste (çip satırı 20+ rutini taşıyamıyor) -->
+<div class="modal-backdrop center-dialog" id="modal-routine-picker">
+  <div class="dialog-box" style="max-width:380px;width:94%">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:800;margin-bottom:14px">⭐ Rutinlerim</div>
+    <div id="routine-picker-content"></div>
+    <button class="btn btn-ghost btn-full" style="margin-top:12px" onclick="closeModal('modal-routine-picker')">Kapat</button>
+  </div>
+</div>
+
 <!-- "Bu değil" seçicisi: kayıtlı rutin/ürünlerden elle seçim -->
 <div class="modal-backdrop center-dialog" id="modal-nut-picker">
   <div class="dialog-box" style="max-width:380px;width:94%">
@@ -1172,7 +1192,7 @@ canvas{width:100%;height:100%;}
 // ── SÜRÜM DAMGASI ─────────────────────────────────────────────
 // Her yeni build'de BUILD değerini artır. Ayarlar'ın en altında görünür.
 const APP_VERSION = '2.5 beta';
-const APP_BUILD   = '2026-08-17.1';
+const APP_BUILD   = '2026-08-17.2';
 const PROXY_URL = 'https://kaslog19.vercel.app/api/gemini';
 
 // GÜVENLİK NOTU (v2.4):
@@ -4880,8 +4900,10 @@ function renderBeslenme() {
       </div>
     </div>
 
-    <div class="nut-add-wrap">
+    <div class="nut-add-wrap${(ST.mealRoutines||[]).length?' has-star':''}">
       <input class="nut-add-input" id="nut-input" placeholder='Örn: "200gr tavuk göğsü" veya fotoğraf seçince açıklama ekle...' onkeydown="if(event.key===\'Enter\')addNutritionEntry()" autocomplete="off">
+      ${(ST.mealRoutines||[]).length
+        ? `<button class="nut-star-btn" onclick="openRoutinePicker()" title="Rutinlerim">⭐</button>` : ''}
       ${_nutSelectedPhotos.length > 0
         ? `<button class="nut-cam-btn" id="nut-cam-btn" onclick="clearNutPhotos()" title="Fotoğrafları temizle" style="background:rgba(239,68,68,0.15);border-color:rgba(239,68,68,0.4)"><svg viewBox="0 0 24 24" style="stroke:var(--danger)"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>`
         : `<button class="nut-cam-btn" id="nut-cam-btn" onclick="document.getElementById(\'nut-photo-input\').click()" title="Fotoğraftan analiz et"><svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></button>`
@@ -5436,7 +5458,7 @@ async function addNutritionEntry() {
   // ÖĞRENİLMİŞ RUTİN — KESİN eşleşme: anında uygula, AI'ya hiç gitme.
   // Belirsiz eşleşmede burada karar VERİLMEZ; kuyrukta AI'ya sorulur, çünkü
   // ağ turu sürerken kullanıcıyı boş ekranda bekletmek istemiyoruz.
-  const { match } = _matchMealRoutine(text);
+  const { match } = _hasExplicitAmounts(text) ? { match: null } : _matchMealRoutine(text);
   if (match) {
     input.value = '';
     const res = await applyMealRoutine(match.id);
@@ -5529,9 +5551,21 @@ async function _enqueueBgJob(pendingId, text){
     const {url,body}=_nutGeminiRequest(text);
     await DB.put('nutQueue',{ id:'q_'+pendingId, pendingId, text, url, body,
       status:'pending', createdAt:Date.now() });
+    // DİKKAT: sync BURADA kaydedilmiyor. Kaydedilince tarayıcı onu anında
+    // tetikliyor, sayfa da kendi isteğini sürdürüyordu; aynı öğün İKİ KEZ
+    // analiz edilip iki ayrı kart olarak ekleniyordu. Arka plan yalnızca
+    // uygulama arka plana atıldığında devreye girmeli.
+  }catch{ /* destek yoksa sessizce geç — sayfa akışı zaten çalışıyor */ }
+}
+
+// Uygulama arka plana atılırken bekleyen iş varsa devri service worker'a ver
+async function _registerNutSync(){
+  try{
+    const jobs=await DB.getAll('nutQueue');
+    if(!jobs.some(j=>j.status==='pending')) return;
     const reg=await navigator.serviceWorker?.ready;
     if(reg?.sync) await reg.sync.register('kaslog-nut-queue');
-  }catch{ /* destek yoksa sessizce geç — sayfa akışı zaten çalışıyor */ }
+  }catch{}
 }
 
 async function _dropBgJob(pendingId){
@@ -5565,6 +5599,18 @@ async function _drainBgJobs(){
 
 // "250ml süt 50gr gevrek" gibi birden fazla miktar işareti taşıyan satırda
 // tek ürün araması yanlış eşleşme üretir — doğrudan kalem ayrıştırmasına git.
+/**
+ * Kullanıcı açıkça miktar yazmış mı? ("240ml", "40gr")
+ * Yazmışsa rutin DAYATILMAZ: rutinin ortalaması uygulanırsa kullanıcının
+ * bilerek girdiği miktar yok sayılır ve yanlış kalori kaydedilir. Üstelik
+ * yeni ölçüm hiç öğrenilmez. Bu durumda normal analiz yapılır, sonuç da
+ * rutinin ortalamasına katılır.
+ * Miktarsız kısa yazım ("kahvaltılık gevrek") ise rutini tetikler.
+ */
+function _hasExplicitAmounts(text){
+  return /\d+\s*(g|gr|gram|ml|lt|litre)\b/i.test(text||'');
+}
+
 function _looksMultiFood(text){
   const m=(text||'').match(/\d+(?:[.,]\d+)?\s*(?:g|gr|gram|ml|lt|litre|adet|tane|dilim|kase|bardak|porsiyon)\b/gi);
   return !!m && m.length>=2;
@@ -5582,6 +5628,9 @@ async function _writeParsedMeal(pendingId, parsed, rawText){
   const idx = ST.nutritionLogs.findIndex(e => e.id === pendingId);
   if (idx === -1) return;
   const base = ST.nutritionLogs[idx];
+  // Sayfa ve service worker aynı anda bitirirse ikincisi hiçbir şey yapmasın;
+  // yoksa öğün iki kez yazılır.
+  if (!base.pending) return;
 
   let items = Array.isArray(parsed.items) ? parsed.items.filter(i => i && (i.kcal || i.name)) : [];
   if (!items.length) {
@@ -6068,6 +6117,7 @@ function _matchMealRoutine(text){
 async function _applyRoutineIfPicked(parsed, pendingId, text){
   const id=parsed?.routineId;
   if(!id || !ST.mealRoutines.some(r=>r.id===id)) return false;
+  if(_hasExplicitAmounts(text)) return false;  // yazdığı miktar geçerli, rutin değil
   await DB.del('nutritionLogs', pendingId);
   ST.nutritionLogs=ST.nutritionLogs.filter(e=>e.id!==pendingId);
   const res=await applyMealRoutine(id);
@@ -6194,6 +6244,12 @@ async function _maybeOfferRoutine(){
       const idx=ST.mealRoutines.findIndex(r=>r.id===existing.id);
       ST.mealRoutines[idx]=upd;
       await DB.put('mealRoutines',upd);
+      // Kullanıcının bu sefer yazdığı ifadeyi de tetik olarak öğren
+      const raw=last.entries.map(e=>e.raw).find(Boolean);
+      if(raw) await _learnRoutineTrigger(existing.id, raw);
+      // Sessizce öğrenmek "sistem beni tanıyor" hissini vermiyor — göster
+      showToast('⭐ "'+upd.name+'" güncellendi · '+(upd.samples||1)+' ölçümün ortalaması');
+      renderBeslenme();
     }
     return;
   }
@@ -6302,6 +6358,14 @@ function toggleRoutineSelectMode(){
   renderBeslenme();
 }
 
+// Grubun TAMAMINI seç/bırak. Ana kart eskiden hiç seçilemiyordu.
+function toggleRoutineSelectionGroup(gid){
+  const ids=ST.nutritionLogs.filter(e=>e.groupId===gid && !e.pending && !e.error).map(e=>e.id);
+  const hepsi=ids.length>0 && ids.every(id=>_routineSelected.has(id));
+  for(const id of ids){ if(hepsi) _routineSelected.delete(id); else _routineSelected.add(id); }
+  renderBeslenme();
+}
+
 function toggleRoutineSelection(id){
   if(_routineSelected.has(id)) _routineSelected.delete(id);
   else _routineSelected.add(id);
@@ -6360,6 +6424,57 @@ async function deleteRoutineFromModal(){
   await deleteMealRoutine(id);
 }
 
+// ---- Rutin seçici (⭐ düğmesi) ---------------------------------
+// Çip satırı 4 rutinden fazlasını taşıyamıyor; 20-25 rutinde yatay kaydırma
+// çile oluyor. Bu liste arama kutusuyla hepsine erişim veriyor.
+let _routinePickQuery='';
+
+function openRoutinePicker(){
+  _routinePickQuery='';
+  _renderRoutinePicker();
+  openModal('modal-routine-picker');
+  setTimeout(()=>document.getElementById('routine-pick-search')?.focus(),80);
+}
+
+function onRoutinePickSearch(v){ _routinePickQuery=v; _renderRoutinePicker(true); }
+
+function _renderRoutinePicker(listOnly){
+  const q=_foodNorm(_routinePickQuery);
+  const list=[...(ST.mealRoutines||[])]
+    .filter(r=>!q || _foodNorm(r.name).includes(q)
+             || r.items.some(i=>_foodNorm(i.name).includes(q))
+             || (r.triggers||[]).some(t=>_foodNorm(t).includes(q)))
+    .sort((a,b)=>(b.useCount||0)-(a.useCount||0) || (b.lastUsedAt||0)-(a.lastUsedAt||0));
+
+  const rows=list.length?list.map(r=>{
+    const kcal=Math.round(r.items.reduce((a,i)=>a+(i.calories||0),0));
+    return `<div style="display:flex;align-items:center;gap:8px;padding:10px 11px;border-radius:10px;background:var(--surface2);border:1.5px solid var(--accent)">
+      <button onclick="applyRoutineFromPicker('${r.id}')" style="flex:1;min-width:0;display:flex;align-items:center;gap:9px;background:transparent;border:none;cursor:pointer;text-align:left;padding:0">
+        <span style="font-size:15px;flex-shrink:0">⭐</span>
+        <span style="flex:1;min-width:0">
+          <span style="display:block;font-size:13.5px;font-weight:700;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.name}</span>
+          <span style="display:block;font-size:11px;color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.items.map(i=>i.name).join(' + ')}</span>
+        </span>
+        <span style="font-size:12px;color:var(--text2);flex-shrink:0">${kcal} kcal</span>
+      </button>
+      <button onclick="closeModal('modal-routine-picker');openRoutineEdit('${r.id}')" title="Düzenle" style="flex-shrink:0;background:transparent;border:none;color:var(--text3);font-size:16px;cursor:pointer;padding:4px 6px">✎</button>
+    </div>`;
+  }).join('')
+  : `<div style="font-size:13px;color:var(--text3);padding:18px 0;text-align:center">${q?'Eşleşen rutin yok.':'Henüz rutin yok.'}</div>`;
+
+  const el=document.getElementById('routine-pick-list');
+  if(listOnly && el){ el.innerHTML=rows; return; }
+  document.getElementById('routine-picker-content').innerHTML=`
+    <input id="routine-pick-search" class="form-input" placeholder="Rutin ara..." autocomplete="off"
+           style="font-size:14px;padding:10px 12px;margin-bottom:12px" oninput="onRoutinePickSearch(this.value)">
+    <div id="routine-pick-list" style="display:flex;flex-direction:column;gap:6px;max-height:54vh;overflow-y:auto">${rows}</div>`;
+}
+
+async function applyRoutineFromPicker(id){
+  closeModal('modal-routine-picker');
+  await applyRoutineFromChip(id);
+}
+
 // Çipe basınca rutini uygula (geri alma seçenekli)
 async function applyRoutineFromChip(id){
   const res=await applyMealRoutine(id);
@@ -6390,18 +6505,35 @@ function _nutMacroHTML(e){
 const _svgEdit = '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
 const _svgDel  = '<svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>';
 
+// Öğünün saati — "ne zaman yedim" bilgisi listede hiç yoktu
+function _hhmm(ts){
+  if(!ts) return '';
+  const d=new Date(ts);
+  return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+}
+
+// Seçim kutusu AYRI bir öğe. Eskiden yiyecek ikonunun YERİNE konuyordu ve
+// seçim modunda hangi satırın ne olduğu görsel olarak kayboluyordu.
+function _checkBox(picked){
+  return `<div style="flex-shrink:0;font-size:17px;line-height:1">${picked?'✅':'⬜'}</div>`;
+}
+
 function _nutEntryRowHTML(e, nested){
   const selectable=_routineSelectMode && !e.pending && !e.error;
   const picked=_routineSelected.has(e.id);
   const nameHTML=e.pending?'<span class="nut-entry-queue-dot"></span>'+e.name:e.name;
   const attrs = selectable
-    ? `onclick="toggleRoutineSelection('${e.id}')" style="cursor:pointer${picked?';border-color:var(--accent);background:var(--accent-dim)':''}"`
+    ? `onclick="toggleRoutineSelection('${e.id}')" style="cursor:pointer${nested?';margin-left:16px':''}${picked?';border-color:var(--accent);background:var(--accent-dim)':''}"`
     : (nested?'style="margin-left:16px"':'');
+  const saat=_hhmm(e.createdAt);
+  const saatHTML=(saat&&!e.pending&&!e.error)
+    ? `<span class="nut-entry-macro" style="color:var(--text3)">🕒 ${saat}</span>` : '';
   return `<div class="nut-entry${e.pending?' pending':''}${e.error?' error':''}" ${attrs}>
-    <div class="nut-entry-icon">${selectable?(picked?'✅':'⬜'):(e.pending?'⏳':(e.emoji||'🍽️'))}</div>
+    ${selectable?_checkBox(picked):''}
+    <div class="nut-entry-icon">${e.pending?'⏳':(e.emoji||'🍽️')}</div>
     <div class="nut-entry-info">
       <div class="nut-entry-name">${nameHTML}</div>
-      <div class="nut-entry-macros">${_nutMacroHTML(e)}</div>
+      <div class="nut-entry-macros">${_nutMacroHTML(e)}${saatHTML}</div>
     </div>
     ${e.error
       ? `<button class="nut-retry-btn" onclick="retryNutritionEntry('${e.id}')">🔄 Tekrar</button>`
@@ -6415,13 +6547,25 @@ function _nutEntryRowHTML(e, nested){
 
 function _nutGroupRowHTML(items){
   const gid=items[0].groupId;
-  // Rutin seçim modunda kalemler tek tek işaretlenebilmeli — hep açık göster
+  // Seçim modunda kalemler tek tek işaretlenebilmeli — grubu hep açık göster
   const open=_expandedNutGroups.has(gid) || _routineSelectMode;
   const kcal=Math.round(items.reduce((a,e)=>a+(e.calories||0),0));
   const sum=k=>Math.round(items.reduce((a,e)=>a+(e[k]||0),0));
   const name=items[0].groupName||items.map(i=>i.name).join(' + ');
   const anyPending=items.some(e=>e.pending);
-  const head=`<div class="nut-entry" onclick="toggleNutGroup('${gid}')" style="cursor:pointer">
+  const secilebilir=_routineSelectMode && !anyPending;
+  const hepsiSecili=secilebilir && items.every(e=>_routineSelected.has(e.id));
+  const ts=Math.min(...items.map(e=>e.createdAt||Infinity));
+  const saat=Number.isFinite(ts)?_hhmm(ts):'';
+  const saatHTML=(saat&&!anyPending)
+    ? `<span class="nut-entry-macro" style="color:var(--text3)">🕒 ${saat}</span>` : '';
+  // Seçim modunda başlığa basmak TÜM kalemleri işaretler. Eskiden ana kart
+  // hiç seçilemiyordu, kullanıcı alt kalemleri tek tek işaretlemek zorundaydı.
+  const tik=secilebilir
+    ? `onclick="toggleRoutineSelectionGroup('${gid}')"`
+    : `onclick="toggleNutGroup('${gid}')"`;
+  const head=`<div class="nut-entry" ${tik} style="cursor:pointer${hepsiSecili?';border-color:var(--accent);background:var(--accent-dim)':''}">
+    ${secilebilir?_checkBox(hepsiSecili):''}
     <div class="nut-entry-icon">${items[0].groupEmoji||items[0].emoji||'🍽️'}</div>
     <div class="nut-entry-info">
       <div class="nut-entry-name">${name} <span style="color:var(--text3);font-weight:500;font-size:12px">· ${items.length} kalem</span></div>
@@ -6429,13 +6573,16 @@ function _nutGroupRowHTML(items){
         <span class="nut-entry-macro">🥩 ${sum('protein')}g protein</span>
         <span class="nut-entry-macro">🌾 ${sum('carbs')}g karb</span>
         <span class="nut-entry-macro">🧈 ${sum('fat')}g yağ</span>
+        ${saatHTML}
       </div>
     </div>
     <div class="nut-entry-kcal">${anyPending?'—':kcal}</div>
+    ${_routineSelectMode?'':`
     <button class="nut-del-btn" onclick="event.stopPropagation();openNutPicker('${items[0].id}')" title="Bu değil — kayıtlılardan seç" style="font-size:17px;letter-spacing:1px">⋯</button>
+    <button class="nut-del-btn" onclick="event.stopPropagation();deleteNutGroup('${gid}')" title="Öğünü sil">${_svgDel}</button>
     <button class="nut-del-btn" style="transform:rotate(${open?90:0}deg);transition:transform .2s">
       <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
-    </button>
+    </button>`}
   </div>`;
   if(!open) return head;
   return head + items.map(e=>_nutEntryRowHTML(e,true)).join('');
@@ -6603,6 +6750,17 @@ async function nutEditWrongMatch(){
   await retryNutritionEntry(e.id);
 }
 
+// Çok kalemli öğünün tamamını sil. Eskiden ana kartı silmenin tek yolu
+// alt kalemleri tek tek silmekti.
+async function deleteNutGroup(gid){
+  const ids=ST.nutritionLogs.filter(e=>e.groupId===gid).map(e=>e.id);
+  for(const id of ids){ await DB.del('nutritionLogs',id); _routineSelected.delete(id); }
+  ST.nutritionLogs=ST.nutritionLogs.filter(e=>e.groupId!==gid);
+  _expandedNutGroups.delete(gid);
+  renderBeslenme();
+  showToast('🗑️ Öğün silindi ('+ids.length+' kalem)');
+}
+
 async function deleteNutritionEntry(id) {
   await DB.del('nutritionLogs', id);
   ST.nutritionLogs = ST.nutritionLogs.filter(e => e.id !== id);
@@ -6766,7 +6924,11 @@ async function init(){
   navigator.serviceWorker?.addEventListener('message', e => {
     if(e.data?.type==='nut-queue-flushed') _drainBgJobs();
   });
-  document.addEventListener('visibilitychange',()=>{ if(!document.hidden) _drainBgJobs(); });
+  document.addEventListener('visibilitychange',()=>{
+    if(document.hidden) _registerNutSync();   // arka plana geçti → devri SW'ye ver
+    else _drainBgJobs();                      // geri döndü → biten işleri yaz
+  });
+  window.addEventListener('pagehide',()=>{ _registerNutSync(); });
   const allPrs=await DB.getAll('prs');
   allPrs.forEach(p=>{ST.prs[p.exId]=p;});
   // Migrate old PRs from settings store to prs store
