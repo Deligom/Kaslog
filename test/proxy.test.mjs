@@ -13,7 +13,7 @@
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const MODES = ['temel', 'hiz', 'global', 'legacy', 'redis', 'redisKopuk'];
+const MODES = ['temel', 'hiz', 'global', 'legacy', 'redis', 'redisKopuk', 'usda', 'usdaYok'];
 const SELF = fileURLToPath(import.meta.url);
 const MODE = process.argv[2];
 
@@ -64,7 +64,12 @@ globalThis.fetch = async (url, opts) => {
   return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: 'ok' }] } }] }) };
 };
 
-const { default: handler } = await import('../api/gemini.js');
+if (MODE === 'usda') process.env.USDA_KEY = 'test-usda-key';
+else if (MODE === 'usdaYok') delete process.env.USDA_KEY;
+
+const { default: handler } = MODE.startsWith('usda')
+  ? await import('../api/usda.js')
+  : await import('../api/gemini.js');
 
 // ── Yardımcılar ──────────────────────────────────────────────
 function mockRes() {
@@ -173,7 +178,9 @@ if (MODE === 'redis') {
   // sessizce "limit hiç çalışmıyor" demek olurdu.
   const ipHourKey = [...redisStore.keys()].find(k => k.includes('7.7.7.7') && k.includes(':h'));
   check('IP-saat sayacı 5 kez arttı', redisStore.get(ipHourKey) === 5, `${ipHourKey}=${redisStore.get(ipHourKey)}`);
-  const globalKey = [...redisStore.keys()].find(k => k.startsWith('kaslog:all:'));
+  // Anahtarlar kova adı taşır (kaslog:<scope>:all:...) — gemini ve usda aynı
+  // bütçeyi paylaşsın diye ikisi de 'ai' kovasını kullanıyor.
+  const globalKey = [...redisStore.keys()].find(k => /^kaslog:[a-z]+:all:/.test(k));
   check('global sayaç da arttı', redisStore.get(globalKey) === 5, `${globalKey}=${redisStore.get(globalKey)}`);
 }
 
@@ -183,6 +190,46 @@ if (MODE === 'redisKopuk') {
   for (let i = 0; i < 5; i++) codes.push(tag(await call({ ip: '8.8.8.8', body: { contents: goodContents } })));
   check('servis çalışmaya devam eder', codes[0] === '200', codes.join(' | '));
   check('bellek sayacı limiti uygular', codes[3] === '429:RATE_LIMIT_IP', codes.join(' | '));
+}
+
+if (MODE === 'usda') {
+  console.log('\n[9] USDA ucu — anahtar tanımlıyken');
+  let sorgu = null;
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('api.nal.usda.gov')) {
+      sorgu = String(url);
+      return { ok: true, status: 200, json: async () => ({ foods: [{
+        description: 'Chicken, breast, raw', fdcId: 171477, dataType: 'SR Legacy',
+        foodNutrients: [{ nutrientId: 1008, value: 120 }, { nutrientId: 1003, value: 22.5 },
+                        { nutrientId: 1005, value: 0 },   { nutrientId: 1004, value: 2.6 }] }] }) };
+    }
+    return { ok: true, status: 200, json: async () => ({}) };
+  };
+  let r = await call({ body: { query: 'chicken breast' } });
+  check('sonuç döndü', r.statusCode === 200 && r.body.found === true, tag(r));
+  check('100g başına değerler doğru', r.body.per100?.kcal === 120 && r.body.per100?.protein === 22.5,
+        JSON.stringify(r.body.per100));
+  check('anahtar URL\'de gönderildi', /api_key=test-usda-key/.test(sorgu || ''), String(sorgu).slice(0, 80));
+  check('yalnızca ölçüme dayalı veri tipleri istendi',
+        /dataType=Foundation/.test(sorgu || '') && !/dataType=Branded/.test(sorgu || ''));
+
+  r = await call({ body: { query: '' } });
+  check('boş sorgu reddedilir', r.statusCode === 400 && r.body.code === 'BAD_QUERY', tag(r));
+  r = await call({ body: { query: 'x'.repeat(200) } });
+  check('aşırı uzun sorgu reddedilir', r.statusCode === 400 && r.body.code === 'BAD_QUERY', tag(r));
+  r = await call({ origin: 'https://kotu-site.com', body: { query: 'egg' } });
+  check('yabancı origin reddedilir', r.statusCode === 403 && r.body.code === 'ORIGIN_DENIED', tag(r));
+
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ foods: [] }) });
+  r = await call({ body: { query: 'bulunamayan-yiyecek' } });
+  check('bulunamayınca found:false', r.statusCode === 200 && r.body.found === false, tag(r));
+}
+
+if (MODE === 'usdaYok') {
+  console.log('\n[10] USDA ucu — anahtar TANIMSIZ (kurulum yapılmamış)');
+  const r = await call({ body: { query: 'egg' } });
+  check('503 + NO_USDA_KEY döner', r.statusCode === 503 && r.body.code === 'NO_USDA_KEY', tag(r));
+  check('istemci bu kademeyi atlayabilsin diye hata değil sinyal', r.body.code === 'NO_USDA_KEY');
 }
 
 console.log(`  ${MODE}: ${pass} geçti, ${fail} kaldı`);

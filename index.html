@@ -1025,8 +1025,9 @@ canvas{width:100%;height:100%;}
       <button class="modal-close" onclick="closeModal('modal-changelog')">✕</button>
     </div>
     <div class="modal-body" style="font-size:13.5px;line-height:1.65">
-      <div style="font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:700;color:var(--accent);margin-bottom:2px">v2.5 beta <span style="font-size:11px;color:var(--text3);font-weight:500">· build 2026-08-17.3</span></div>
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:700;color:var(--accent);margin-bottom:2px">v2.5 beta <span style="font-size:11px;color:var(--text3);font-weight:500">· build 2026-08-17.4</span></div>
       <ul style="padding-left:18px;margin:0 0 16px;color:var(--text2)">
+        <li><b>Besin değerleri artık gerçek veriden:</b> ham yiyeceklerde (tavuk, pilav, süt) USDA laboratuvar verisi kullanılıyor, AI yalnızca son çare</li>
         <li>Rutine sonradan kalem ekleme/çıkarma: makroları sen girmiyorsun, kayıtlı ürün → Open Food Facts → AI sırasıyla aranıyor</li>
         <li><b>Tek girişten iki öğün</b> hatası giderildi (analiz iki kez gönderiliyordu)</li>
         <li>Açık miktar yazınca ("240ml süt") rutin dayatılmıyor; yazdığın değer geçerli ve ortalamaya katılıyor</li>
@@ -1193,7 +1194,7 @@ canvas{width:100%;height:100%;}
 // ── SÜRÜM DAMGASI ─────────────────────────────────────────────
 // Her yeni build'de BUILD değerini artır. Ayarlar'ın en altında görünür.
 const APP_VERSION = '2.5 beta';
-const APP_BUILD   = '2026-08-17.3';
+const APP_BUILD   = '2026-08-17.4';
 const PROXY_URL = 'https://kaslog19.vercel.app/api/gemini';
 
 // GÜVENLİK NOTU (v2.4):
@@ -5521,7 +5522,9 @@ routineId null olsun: tek bir yiyecek kastediyordur. Emin değilsen null.
 ${routineBlock}
 Kurallar:
 1. SADECE JSON döndür. Markdown yok, açıklama yok, kod bloğu yok.
-2. Şema: {"name":"string","emoji":"string","productQuery":"string|null","routineId":"string|null","items":[{"name":"string","kcal":number,"protein":number,"carbs":number,"fat":number,"emoji":"string"}]}
+2. Şema: {"name":"string","emoji":"string","productQuery":"string|null","routineId":"string|null","items":[{"name":"string","en":"string|null","grams":number|null,"kcal":number,"protein":number,"carbs":number,"fat":number,"emoji":"string"}]}
+2b. items[].en: GENEL/HAM yiyecekse İngilizce karşılığı ("chicken breast", "cooked white rice", "whole milk", "banana"). Markalı paketli üründe null.
+2c. items[].grams: o kalemin gram cinsinden ağırlığı (sıvılarda ml≈g say). Bilmiyorsan makul tahmin et.
 3. items: Girişteki HER AYRI YİYECEK için bir kalem. "250ml süt 50gr gevrek" → 2 kalem.
    Tek yiyecek varsa tek kalemlik dizi döndür.
 4. items[].name: Türkçe isim + miktar (örn: "Süt 250ml", "Kahvaltılık Gevrek 50g").
@@ -5617,6 +5620,53 @@ function _looksMultiFood(text){
   return !!m && m.length>=2;
 }
 
+// ---- USDA FoodData Central ------------------------------------
+// AI besin değerlerinde yanılıyor; buna karşılık "bu ne ve kaç gram"
+// sorusunda iyi. Bu yüzden iş bölümü: ANLAMA + ÇEVİRİ AI'da, SAYILAR USDA'da.
+// USDA resmî laboratuvar verisi verir ve ham yiyeceklerde (tavuk, pilav, süt)
+// Open Food Facts'in zayıf kaldığı boşluğu kapatır.
+// Anahtar kurulmamışsa uç 503 döner, kademe sessizce atlanır.
+const USDA_URL = PROXY_URL.replace(/\/api\/gemini$/, '/api/usda');
+let _usdaDisabled = false;          // 503 gelince bir daha deneme
+const _usdaCache = new Map();
+
+async function _lookupUSDA(query){
+  if(_usdaDisabled || !query) return null;
+  const key=_foodNorm(query);
+  if(!key) return null;
+  if(_usdaCache.has(key)) return _usdaCache.get(key);
+  try{
+    const r=await fetch(USDA_URL,{ method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({query}), signal:AbortSignal.timeout(7000) });
+    if(r.status===503){ _usdaDisabled=true; return null; }   // kurulmamış
+    if(!r.ok) return null;
+    const d=await r.json();
+    const val=d?.found ? d : null;
+    _usdaCache.set(key,val);
+    return val;
+  }catch{ return null; }
+}
+
+/**
+ * AI'nın tahmin ettiği makroları, mümkün olan kalemlerde USDA verisiyle
+ * değiştir. Bulunamayan kalem AI tahmininde kalır — hiç veri olmamasından iyi.
+ */
+async function _refineItemsWithUSDA(items){
+  for(const it of items){
+    const g=+it.grams||0;
+    if(!it.en || !(g>0)) continue;
+    const u=await _lookupUSDA(it.en);
+    if(!u?.per100?.kcal) continue;
+    const f=g/100;
+    it.kcal    = Math.round(u.per100.kcal*f);
+    it.protein = Math.round((u.per100.protein||0)*f*10)/10;
+    it.carbs   = Math.round((u.per100.carbs||0)*f*10)/10;
+    it.fat     = Math.round((u.per100.fat||0)*f*10)/10;
+    it.source  = 'usda';
+  }
+  return items;
+}
+
 /**
  * Gemini yanıtını öğün kayıtlarına yaz.
  * Tek kalemse bekleyen kayıt güncellenir. Birden fazlaysa kalemler AYRI
@@ -5638,6 +5688,8 @@ async function _writeParsedMeal(pendingId, parsed, rawText){
     items = [{ name: parsed.name || rawText, kcal: parsed.totalKcal, protein: parsed.totalProtein,
                carbs: parsed.totalCarbs, fat: parsed.totalFat, emoji: parsed.emoji }];
   }
+  // Sayıları mümkün olduğunca gerçek veriyle değiştir (AI tahmini son çare)
+  await _refineItemsWithUSDA(items);
 
   const mk = (it, i) => ({
     id: i === 0 ? base.id : 'n_' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
@@ -5648,8 +5700,9 @@ async function _writeParsedMeal(pendingId, parsed, rawText){
     carbs:   Math.round((+it.carbs   || 0) * 10) / 10,
     fat:     Math.round((+it.fat     || 0) * 10) / 10,
     emoji: it.emoji || parsed.emoji || '🍽️',
-    portionNote: '~AI tahmini',
-    matchSource: 'ai',
+    // Kullanıcı sayının nereden geldiğini görsün: ölçüm mü, tahmin mi?
+    portionNote: it.source==='usda' ? '🔬 USDA verisi' : '~AI tahmini',
+    matchSource: it.source==='usda' ? 'usda' : 'ai',
     raw: rawText,
     pending: false,
     createdAt: (base.createdAt || Date.now()) + i,
