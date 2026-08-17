@@ -1025,7 +1025,7 @@ canvas{width:100%;height:100%;}
       <button class="modal-close" onclick="closeModal('modal-changelog')">✕</button>
     </div>
     <div class="modal-body" style="font-size:13.5px;line-height:1.65">
-      <div style="font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:700;color:var(--accent);margin-bottom:2px">v2.5 beta <span style="font-size:11px;color:var(--text3);font-weight:500">· build 2026-08-17.4</span></div>
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:700;color:var(--accent);margin-bottom:2px">v2.5 beta <span style="font-size:11px;color:var(--text3);font-weight:500">· build 2026-08-17.5</span></div>
       <ul style="padding-left:18px;margin:0 0 16px;color:var(--text2)">
         <li><b>Besin değerleri artık gerçek veriden:</b> ham yiyeceklerde (tavuk, pilav, süt) USDA laboratuvar verisi kullanılıyor, AI yalnızca son çare</li>
         <li>Rutine sonradan kalem ekleme/çıkarma: makroları sen girmiyorsun, kayıtlı ürün → Open Food Facts → AI sırasıyla aranıyor</li>
@@ -1194,7 +1194,7 @@ canvas{width:100%;height:100%;}
 // ── SÜRÜM DAMGASI ─────────────────────────────────────────────
 // Her yeni build'de BUILD değerini artır. Ayarlar'ın en altında görünür.
 const APP_VERSION = '2.5 beta';
-const APP_BUILD   = '2026-08-17.4';
+const APP_BUILD   = '2026-08-17.5';
 const PROXY_URL = 'https://kaslog19.vercel.app/api/gemini';
 
 // GÜVENLİK NOTU (v2.4):
@@ -5523,7 +5523,14 @@ ${routineBlock}
 Kurallar:
 1. SADECE JSON döndür. Markdown yok, açıklama yok, kod bloğu yok.
 2. Şema: {"name":"string","emoji":"string","productQuery":"string|null","routineId":"string|null","items":[{"name":"string","en":"string|null","grams":number|null,"kcal":number,"protein":number,"carbs":number,"fat":number,"emoji":"string"}]}
-2b. items[].en: GENEL/HAM yiyecekse İngilizce karşılığı ("chicken breast", "cooked white rice", "whole milk", "banana"). Markalı paketli üründe null.
+2b. items[].en: SADECE tek malzemeli temel yiyeceklerde doldur (et, tahıl, süt
+    ürünü, meyve, sebze, yumurta, bakliyat). İngilizce karşılığını yaz ve
+    PİŞİRME DURUMUNU MUTLAKA BELİRT: "grilled chicken breast", "cooked white
+    rice", "raw spinach", "boiled egg", "whole milk", "banana".
+    Pişmiş bir yiyeceğe "raw" karşılık verirsen kalori yanlış hesaplanır.
+    Şu durumlarda null yaz: markalı paketli ürün; birden çok malzemeden oluşan
+    yemek/çorba/tabak (mercimek çorbası, kuru fasulye, menemen, döner, pide).
+    Bu tür yemeklerde kendi tahminin daha isabetli olur.
 2c. items[].grams: o kalemin gram cinsinden ağırlığı (sıvılarda ml≈g say). Bilmiyorsan makul tahmin et.
 3. items: Girişteki HER AYRI YİYECEK için bir kalem. "250ml süt 50gr gevrek" → 2 kalem.
    Tek yiyecek varsa tek kalemlik dizi döndür.
