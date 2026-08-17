@@ -24,6 +24,18 @@ alan adın varsa mutlaka yaz.
 |---|---|
 | `APP_SECRET` | **SİL.** v2.3'te HMAC imzalama için kullanılıyordu; anahtar istemci kodunda düz metin olduğu için hiçbir koruma sağlamıyordu. v2.4 bu mekanizmayı tamamen kaldırdı. |
 
+### Besin doğruluğu için (önerilen, ücretsiz)
+
+| Değişken | Değer |
+|---|---|
+| `USDA_KEY` | USDA FoodData Central anahtarı |
+
+Anahtar: [fdc.nal.usda.gov/api-key-signup.html](https://fdc.nal.usda.gov/api-key-signup.html) — e-posta yazıyorsun, anahtar anında geliyor. Onay süreci, IP kısıtı veya ücret yok.
+
+**Neden gerekli:** Open Food Facts paketli/markalı ürünlerde iyi ama ham yiyeceklerde (tavuk göğsü, pilav, süt, yumurta) zayıf. Orada AI tahminine düşülüyordu ve AI besin değerlerinde yanılıyor. USDA resmî laboratuvar verisi veriyor. İş bölümü şöyle: **AI "bu ne ve kaç gram" sorusunu çözüyor, sayılar USDA'dan geliyor.**
+
+Tanımlamazsan uygulama çalışmaya devam eder — `/api/usda` ucu `503` döner, istemci bu kademeyi bir kez deneyip sessizce atlar ve eskisi gibi AI tahminini kullanır.
+
 ### Hız sınırı için (önerilen)
 
 Vercel Dashboard → **Storage → Marketplace → Upstash (Redis)** → ücretsiz plan
