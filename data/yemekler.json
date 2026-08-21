@@ -8,16 +8,19 @@
   ],
   "kategori": "corba",
   "per100": {
-   "kcal": 128,
-   "protein": 4.4,
-   "carbs": 12.5,
-   "fat": 7
+   "kcal": 68,
+   "protein": 3.4,
+   "carbs": 9.5,
+   "fat": 3.2
   },
-  "tarifSayisi": 2,
-  "yayilimKcal": 49,
+  "tarifSayisi": 5,
+  "yayilimKcal": 97,
   "kaynaklar": [
    "https://yemek.com/tarif/mercimek-corbasi/",
-   "https://yemek.com/tarif/kolay-mercimek-corbasi/"
+   "https://yemek.com/tarif/kolay-mercimek-corbasi/",
+   "https://www.lezzet.com.tr/yemek-tarifleri/corbalar/corba-tarifleri/mercimek-corbasi",
+   "https://www.kisikatesakademi.com.tr/tarif/mercimek-corbasi-tarifi-566",
+   "https://hayfene.com/blog/mercimek-corbasi-tarifi"
   ],
   "derlenme": "2026-08-21"
  },

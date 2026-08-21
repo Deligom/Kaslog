@@ -198,7 +198,10 @@ function tarifHesapla(recipe, kategori) {
   if (kalMetin && porsiyon) {
     const kalSayi = Number(String(kalMetin).match(/(\d+)/)?.[1] || 0);
     if (kalSayi > 0 && kcal > 0) {
-      const siteToplam = kalSayi * Number(porsiyon[1]);
+      // "Toplam 687 kcal" gibi ifadeler zaten TUM tarif icin; porsiyonla
+      // carparsak 6 katina cikar. "290 kalori" ise porsiyon basina.
+      const toplamMi = /toplam/i.test(String(kalMetin));
+      const siteToplam = toplamMi ? kalSayi : kalSayi * Number(porsiyon[1]);
       const oran = siteToplam / kcal;
       const guvenilir = oran >= 0.5 && oran <= 2.0;
       if (guvenilir) olcek = oran;
