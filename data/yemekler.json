@@ -1,0 +1,106 @@
+{
+ "mercimek corbasi": {
+  "ad": "mercimek çorbası",
+  "esanlamlilar": [
+   "kırmızı mercimek çorbası",
+   "mercimek corbasi",
+   "süzme mercimek çorbası"
+  ],
+  "kategori": "corba",
+  "per100": {
+   "kcal": 68,
+   "protein": 3.4,
+   "carbs": 9.5,
+   "fat": 3.2
+  },
+  "tarifSayisi": 5,
+  "yayilimKcal": 97,
+  "kaynaklar": [
+   "https://yemek.com/tarif/mercimek-corbasi/",
+   "https://yemek.com/tarif/kolay-mercimek-corbasi/",
+   "https://www.lezzet.com.tr/yemek-tarifleri/corbalar/corba-tarifleri/mercimek-corbasi",
+   "https://www.kisikatesakademi.com.tr/tarif/mercimek-corbasi-tarifi-566",
+   "https://hayfene.com/blog/mercimek-corbasi-tarifi"
+  ],
+  "derlenme": "2026-08-21"
+ },
+ "ezogelin corbasi": {
+  "ad": "ezogelin çorbası",
+  "esanlamlilar": [
+   "ezogelin"
+  ],
+  "kategori": "corba",
+  "per100": {
+   "kcal": 34,
+   "protein": 1.8,
+   "carbs": 6.1,
+   "fat": 0.5
+  },
+  "tarifSayisi": 1,
+  "yayilimKcal": 0,
+  "kaynaklar": [
+   "https://yemek.com/tarif/ezogelin-corbasi/"
+  ],
+  "derlenme": "2026-08-21"
+ },
+ "kuru fasulye": {
+  "ad": "kuru fasulye",
+  "esanlamlilar": [
+   "fasulye",
+   "etli kuru fasulye"
+  ],
+  "kategori": "yemek",
+  "per100": {
+   "kcal": 152,
+   "protein": 7.5,
+   "carbs": 19.9,
+   "fat": 5.2
+  },
+  "tarifSayisi": 1,
+  "yayilimKcal": 0,
+  "kaynaklar": [
+   "https://yemek.com/tarif/kuru-fasulye/"
+  ],
+  "derlenme": "2026-08-21"
+ },
+ "pirinc pilavi": {
+  "ad": "pirinç pilavı",
+  "esanlamlilar": [
+   "pilav",
+   "tereyağlı pilav",
+   "sade pilav"
+  ],
+  "kategori": "pilav",
+  "per100": {
+   "kcal": 202,
+   "protein": 3.2,
+   "carbs": 38.2,
+   "fat": 3.6
+  },
+  "tarifSayisi": 1,
+  "yayilimKcal": 0,
+  "kaynaklar": [
+   "https://yemek.com/tarif/pirinc-pilavi/"
+  ],
+  "derlenme": "2026-08-21"
+ },
+ "menemen": {
+  "ad": "menemen",
+  "esanlamlilar": [
+   "menemen kahvaltı"
+  ],
+  "kategori": "yemek",
+  "per100": {
+   "kcal": 88,
+   "protein": 3,
+   "carbs": 3.2,
+   "fat": 7.3
+  },
+  "tarifSayisi": 1,
+  "yayilimKcal": 0,
+  "kaynaklar": [
+   "https://yemek.com/tarif/menemen/"
+  ],
+  "derlenme": "2026-08-21"
+ }
+}

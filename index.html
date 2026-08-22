@@ -1025,8 +1025,11 @@ canvas{width:100%;height:100%;}
       <button class="modal-close" onclick="closeModal('modal-changelog')">✕</button>
     </div>
     <div class="modal-body" style="font-size:13.5px;line-height:1.65">
-      <div style="font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:700;color:var(--accent);margin-bottom:2px">v2.5 beta <span style="font-size:11px;color:var(--text3);font-weight:500">· build 2026-08-17.4</span></div>
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:700;color:var(--accent);margin-bottom:2px">v2.5 beta <span style="font-size:11px;color:var(--text3);font-weight:500">· build 2026-08-21.1</span></div>
       <ul style="padding-left:18px;margin:0 0 16px;color:var(--text2)">
+        <li><b>Kendi tarifin:</b> malzemeleri bir kez gir, tencereyi tart — sonrasında sadece kaseyi tartman yeter, tahmin yok</li>
+        <li>Porsiyon hafızası: "1 kase" senin için kaç gram, bir kez sorulur</li>
+        <li>Ürün aramada kelime sınırı hatası düzeldi ("su" yazınca "Sütaş Tereyağı" gelebiliyordu)</li>
         <li><b>Besin değerleri artık gerçek veriden:</b> ham yiyeceklerde (tavuk, pilav, süt) USDA laboratuvar verisi kullanılıyor, AI yalnızca son çare</li>
         <li>Rutine sonradan kalem ekleme/çıkarma: makroları sen girmiyorsun, kayıtlı ürün → Open Food Facts → AI sırasıyla aranıyor</li>
         <li><b>Tek girişten iki öğün</b> hatası giderildi (analiz iki kez gönderiliyordu)</li>
@@ -1143,6 +1146,40 @@ canvas{width:100%;height:100%;}
   </div>
 </div>
 
+<!-- Porsiyon hafızası: "1 kase" senin için kaç gram? Bir kez sorulur. -->
+<div class="modal-backdrop center-dialog" id="modal-porsiyon">
+  <div class="dialog-box" style="max-width:340px;width:92%">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:800;margin-bottom:4px">⚖️ Kaç gram?</div>
+    <div id="porsiyon-baslik" style="font-size:14px;color:var(--accent);font-weight:700;margin-bottom:10px"></div>
+    <div id="porsiyon-oneri" style="font-size:12px;color:var(--text2);line-height:1.5;margin-bottom:14px"></div>
+    <input class="form-input" id="porsiyon-input" type="number" inputmode="decimal" step="1" min="1"
+           placeholder="örn. 320" style="font-size:15px;padding:11px 12px;margin-bottom:14px"
+           onkeydown="if(event.key==='Enter'){event.preventDefault();kaydetPorsiyon();}">
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-porsiyon')">Vazgeç</button>
+      <button class="btn btn-primary" style="flex:1" onclick="kaydetPorsiyon()">Kaydet ve ekle</button>
+    </div>
+  </div>
+</div>
+
+<!-- Yeni kişisel tarif -->
+<div class="modal-backdrop center-dialog" id="modal-yeni-tarif">
+  <div class="dialog-box" style="max-width:360px;width:93%">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:800;margin-bottom:6px">🍲 Kendi tarifin</div>
+    <div style="font-size:12.5px;color:var(--text2);line-height:1.55;margin-bottom:14px">
+      Malzemeleri bir kez gir, tencereyi tart. Uygulama 100 g başına değeri hesaplar;
+      bundan sonra sadece kaseyi tartman yeter. Hiçbir veri tabanı senin tarifini bilemez.
+    </div>
+    <input class="form-input" id="yeni-tarif-adi" placeholder="Tarif adı (örn. Mercimek çorbam)" autocomplete="off"
+           style="font-size:14px;padding:11px 12px;margin-bottom:14px"
+           onkeydown="if(event.key==='Enter'){event.preventDefault();yeniTarifOlustur();}">
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-yeni-tarif')">Vazgeç</button>
+      <button class="btn btn-primary" style="flex:1" onclick="yeniTarifOlustur()">Devam</button>
+    </div>
+  </div>
+</div>
+
 <!-- Rutinlerim: aramalı liste (çip satırı 20+ rutini taşıyamıyor) -->
 <div class="modal-backdrop center-dialog" id="modal-routine-picker">
   <div class="dialog-box" style="max-width:380px;width:94%">
@@ -1194,7 +1231,7 @@ canvas{width:100%;height:100%;}
 // ── SÜRÜM DAMGASI ─────────────────────────────────────────────
 // Her yeni build'de BUILD değerini artır. Ayarlar'ın en altında görünür.
 const APP_VERSION = '2.5 beta';
-const APP_BUILD   = '2026-08-17.4';
+const APP_BUILD   = '2026-08-21.1';
 const PROXY_URL = 'https://kaslog19.vercel.app/api/gemini';
 
 // GÜVENLİK NOTU (v2.4):
@@ -4943,9 +4980,12 @@ function renderBeslenme() {
       if (!chips.length && !routines.length) return '';
       return `<div style="display:flex;gap:6px;overflow-x:auto;padding:2px 20px 6px;-webkit-overflow-scrolling:touch;scrollbar-width:none">
         ${routines.map(r => {
-          const kcal = Math.round(r.items.reduce((a,i)=>a+(i.calories||0),0));
+          // Tarifte kalem toplamı değil 100 g başına değer anlamlı
+          const kcal = r.type==='recipe'
+            ? (r.per100 ? r.per100.kcal : 0)
+            : Math.round(r.items.reduce((a,i)=>a+(i.calories||0),0));
           return `<span style="flex-shrink:0;display:inline-flex;align-items:center;border-radius:20px;background:var(--accent-dim);border:1.5px solid var(--accent);white-space:nowrap;overflow:hidden">
-            <button onclick="applyRoutineFromChip('${r.id}')" style="display:inline-flex;align-items:center;gap:5px;padding:7px 4px 7px 12px;background:transparent;border:none;color:var(--accent);font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap">⭐ ${r.name}<span style="opacity:.75;font-weight:500">${kcal}</span></button>
+            <button onclick="applyRoutineFromChip('${r.id}')" style="display:inline-flex;align-items:center;gap:5px;padding:7px 4px 7px 12px;background:transparent;border:none;color:var(--accent);font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap">${r.type==='recipe'?'🍲':'⭐'} ${r.name}<span style="opacity:.75;font-weight:500">${kcal}${r.type==='recipe'?'/100g':''}</span></button>
             <button onclick="openRoutineEdit('${r.id}')" title="Düzenle" style="padding:7px 10px 7px 6px;background:transparent;border:none;color:var(--accent);opacity:.7;font-size:13px;cursor:pointer">⋯</button>
           </span>`;
         }).join('')}
@@ -5312,6 +5352,19 @@ function _foodFrequency(){
 }
 
 // 1. KADEME: Lokal foodDb'de ara (öğrenilmiş ürünler). Basit skorlu eşleşme.
+/**
+ * Kelime SINIRINA saygılı eşleşme.
+ * Düz `includes` "su"yu "Sütaş"ın içinde buluyordu ve su, tereyağı olarak
+ * kaydediliyordu. Türkçe ek toleransı için 4+ harfli sorgular kelime başında
+ * da eşleşebilir ("mercimek" → "mercimeği"), kısa sorgular tam kelime ister.
+ */
+function _kelimeGecer(ad, kelime){
+  const h=' '+ad+' ';
+  if(h.includes(' '+kelime+' ')) return true;
+  if(kelime.length>=4) return h.includes(' '+kelime);   // ek almış hâli
+  return false;
+}
+
 function _lookupLocalFood(query){
   const q=_foodNorm(query); if(!q||!ST.foodDb?.length) return null;
   // Miktar/birim kelimeleri eşleşme oranını haksız yere düşürüyordu:
@@ -5324,7 +5377,7 @@ function _lookupLocalFood(query){
     const n=f.norm||_foodNorm(f.name);
     if(n===q) return f; // tam eşleşme
     let hit=0;
-    for(const w of qWords) if(n.includes(w)) hit++;
+    for(const w of qWords) if(_kelimeGecer(n,w)) hit++;
     const score=hit/qWords.length;
     if(score<0.75) continue; // kelimelerin ≥%75'i eşleşmeli
     // Sıklık yalnızca eşiği geçenler arasında SIRALAMA yapar; eşiği düşürmez.
@@ -5460,16 +5513,14 @@ async function addNutritionEntry() {
   // ÖĞRENİLMİŞ RUTİN — KESİN eşleşme: anında uygula, AI'ya hiç gitme.
   // Belirsiz eşleşmede burada karar VERİLMEZ; kuyrukta AI'ya sorulur, çünkü
   // ağ turu sürerken kullanıcıyı boş ekranda bekletmek istemiyoruz.
-  const { match } = _hasExplicitAmounts(text) ? { match: null } : _matchMealRoutine(text);
+  // Tür önemli: TARİF yazılı gramla ölçeklenir (miktar bilgisi İŞE YARAR),
+  // RUTİN sabit porsiyon taşır (miktar yazıldıysa dayatılmamalı).
+  const { match } = _matchMealRoutine(text);
   if (match) {
+    const onceki = input.value;
     input.value = '';
-    const res = await applyMealRoutine(match.id);
-    if (res) {
-      await _learnRoutineTrigger(match.id, text);
-      showActionToast('⭐ ' + res.routine.name + ' eklendi', 'Geri al',
-        () => _undoRoutineApply(res.added, res.routine.id));
-      return;
-    }
+    if (await _uygulaEslesme(match, text)) return;
+    input.value = onceki;   // uygulanmadı, normal analize düşsün
   }
 
   // Hemen listede göster — pending durumda
@@ -5523,7 +5574,14 @@ ${routineBlock}
 Kurallar:
 1. SADECE JSON döndür. Markdown yok, açıklama yok, kod bloğu yok.
 2. Şema: {"name":"string","emoji":"string","productQuery":"string|null","routineId":"string|null","items":[{"name":"string","en":"string|null","grams":number|null,"kcal":number,"protein":number,"carbs":number,"fat":number,"emoji":"string"}]}
-2b. items[].en: GENEL/HAM yiyecekse İngilizce karşılığı ("chicken breast", "cooked white rice", "whole milk", "banana"). Markalı paketli üründe null.
+2b. items[].en: SADECE tek malzemeli temel yiyeceklerde doldur (et, tahıl, süt
+    ürünü, meyve, sebze, yumurta, bakliyat). İngilizce karşılığını yaz ve
+    PİŞİRME DURUMUNU MUTLAKA BELİRT: "grilled chicken breast", "cooked white
+    rice", "raw spinach", "boiled egg", "whole milk", "banana".
+    Pişmiş bir yiyeceğe "raw" karşılık verirsen kalori yanlış hesaplanır.
+    Şu durumlarda null yaz: markalı paketli ürün; birden çok malzemeden oluşan
+    yemek/çorba/tabak (mercimek çorbası, kuru fasulye, menemen, döner, pide).
+    Bu tür yemeklerde kendi tahminin daha isabetli olur.
 2c. items[].grams: o kalemin gram cinsinden ağırlığı (sıvılarda ml≈g say). Bilmiyorsan makul tahmin et.
 3. items: Girişteki HER AYRI YİYECEK için bir kalem. "250ml süt 50gr gevrek" → 2 kalem.
    Tek yiyecek varsa tek kalemlik dizi döndür.
@@ -6198,6 +6256,180 @@ async function _learnRoutineTrigger(routineId, rawText){
 }
 
 // Rutini bugüne uygula. Eklenen giriş id'lerini döner (geri alma için).
+// ============================================================
+// KİŞİSEL TARİF — tencere yöntemi
+//
+// Hiçbir veri tabanı senin annenin mercimek çorbasını bilmiyor. Ama sen
+// bir kez ölçersen sonsuza kadar kesin olur:
+//
+//   Malzemeleri bir kez gir  →  tencerenin tamamını tart
+//   → uygulama 100 g başına değeri hesaplar
+//   → bundan sonra sadece kaseyi tartman yeter
+//
+// Rutinden farkı: RUTİN sabit porsiyonlar taşır (süt 245ml + gevrek 47g,
+// hep aynı eklenir). TARİF 100 g başına değer taşır ve YEDİĞİN AĞIRLIKLA
+// ölçeklenir. İkisi de mealRoutines'te durur, `type` ayırır.
+// ============================================================
+
+// Porsiyon kapları: "1 kase çorba" derken kastedilen kap. Kaç gram olduğu
+// kişiden kişiye değişir, o yüzden ÖĞRENİLİR (bkz. r.portions).
+const PORSIYON_KAPLARI = ['kase','tabak','bardak','kepce','porsiyon','kupa','canak','dilim'];
+
+function _recipePer100(items, yieldG){
+  if(!(yieldG>0) || !items?.length) return null;
+  const t=items.reduce((a,i)=>({
+    kcal:a.kcal+(+i.calories||0), p:a.p+(+i.protein||0),
+    k:a.k+(+i.carbs||0), y:a.y+(+i.fat||0),
+  }),{kcal:0,p:0,k:0,y:0});
+  const f=100/yieldG;
+  return { kcal:Math.round(t.kcal*f), protein:Math.round(t.p*f*10)/10,
+           carbs:Math.round(t.k*f*10)/10, fat:Math.round(t.y*f*10)/10 };
+}
+
+// Metinde geçen porsiyon kabını bul ("1 kase mercimek çorbası" → "kase")
+function _portionWord(text){
+  const n=_foodNorm(text);
+  for(const kap of PORSIYON_KAPLARI) if(n.includes(' '+kap) || n.startsWith(kap+' ')) return kap;
+  return null;
+}
+
+/**
+ * Bu girişte kaç gram yenmiş?
+ * @returns {{gram:number, kaynak:'yazili'|'ogrenilmis'}|{gram:null, kap:string|null}}
+ */
+function _recipeGrams(text, r){
+  // 1) Açıkça yazdıysa o geçerli — en güvenilir bilgi
+  const {qty, grams}=_parseFoodText(text);
+  if(grams>0) return { gram:grams, kaynak:'yazili' };
+
+  // 2) Kabı daha önce tarttıysak biliyoruz
+  const kap=_portionWord(text);
+  if(kap && r.portions?.[kap]>0) return { gram:r.portions[kap]*(qty||1), kaynak:'ogrenilmis', kap };
+
+  // 3) Bilinmiyor — kullanıcıya soracağız
+  return { gram:null, kap:kap||'porsiyon' };
+}
+
+/** Tarifi belirtilen ağırlıkla uygula. Tek bir kayıt üretir. */
+async function applyMealRecipe(recipeId, gram){
+  const r=ST.mealRoutines.find(x=>x.id===recipeId);
+  if(!r?.per100 || !(gram>0)) return null;
+  const f=gram/100;
+  const entry={
+    id:'n_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),
+    date:todayDateKey(),
+    name:r.name+' '+Math.round(gram)+'g',
+    calories:Math.round(r.per100.kcal*f),
+    protein:Math.round(r.per100.protein*f*10)/10,
+    carbs:Math.round(r.per100.carbs*f*10)/10,
+    fat:Math.round(r.per100.fat*f*10)/10,
+    emoji:r.emoji||'🍲',
+    portionNote:'📐 kendi tarifin',
+    matchSource:'recipe', routineId:r.id,
+    pending:false, createdAt:Date.now(),
+  };
+  await DB.put('nutritionLogs',entry);
+  ST.nutritionLogs.push(entry);
+  const upd={...r, useCount:(r.useCount||0)+1, lastUsedAt:Date.now()};
+  const idx=ST.mealRoutines.findIndex(x=>x.id===r.id);
+  ST.mealRoutines[idx]=upd;
+  await DB.put('mealRoutines',upd);
+  renderBeslenme();
+  return {routine:upd, added:[entry.id]};
+}
+
+// ---- Porsiyon hafızası -----------------------------------------
+// "1 kase" senin için belli bir gram. Bir kez sorulur, sonra hep bilinir.
+let _porsiyonBekleyen=null;   // {recipeId, kap, text}
+
+function sorPorsiyon(recipeId, kap, text){
+  const r=ST.mealRoutines.find(x=>x.id===recipeId); if(!r) return;
+  _porsiyonBekleyen={recipeId, kap, text};
+  document.getElementById('porsiyon-baslik').textContent='1 ' + kap + ' ' + r.name;
+  const inp=document.getElementById('porsiyon-input');
+  inp.value = r.portions?.[kap] || '';
+  document.getElementById('porsiyon-oneri').textContent =
+    'Tartıp yazarsan bir daha sorulmaz — bundan sonraki her "' + kap + '" bu ağırlıkla hesaplanır.';
+  openModal('modal-porsiyon');
+  setTimeout(()=>inp.focus(),120);
+}
+
+async function kaydetPorsiyon(){
+  const g=parseFloat(String(document.getElementById('porsiyon-input')?.value||'').replace(',','.'));
+  if(!(g>0)){ showToast('Geçerli bir gram gir',true); return; }
+  const b=_porsiyonBekleyen; if(!b) { closeModal('modal-porsiyon'); return; }
+  const idx=ST.mealRoutines.findIndex(x=>x.id===b.recipeId);
+  if(idx!==-1){
+    const r=ST.mealRoutines[idx];
+    ST.mealRoutines[idx]={...r, portions:{...(r.portions||{}), [b.kap]:g}};
+    await DB.put('mealRoutines',ST.mealRoutines[idx]);
+  }
+  closeModal('modal-porsiyon');
+  const res=await applyMealRecipe(b.recipeId, g);
+  _porsiyonBekleyen=null;
+  if(res) showActionToast('📐 '+res.routine.name+' eklendi','Geri al',
+    ()=>_undoRoutineApply(res.added,res.routine.id));
+}
+
+/**
+ * Eşleşen kaydı türüne göre uygula.
+ * @returns {boolean} işlendi mi (false ise normal analiz akışı sürsün)
+ */
+async function _uygulaEslesme(match, text){
+  if(match.type==='recipe'){
+    if(!match.per100){ showToast('Bu tarifin tencere ağırlığı girilmemiş',true); return false; }
+    const g=_recipeGrams(text, match);
+    if(g.gram==null){ sorPorsiyon(match.id, g.kap, text); return true; }
+    const res=await applyMealRecipe(match.id, g.gram);
+    if(!res) return false;
+    await _learnRoutineTrigger(match.id, text);
+    showActionToast('📐 '+res.routine.name+' eklendi'+(g.kaynak==='ogrenilmis'?' ('+Math.round(g.gram)+'g)':''),
+      'Geri al', ()=>_undoRoutineApply(res.added,res.routine.id));
+    return true;
+  }
+  // Rutin: sabit porsiyon taşır. Kullanıcı açıkça miktar yazdıysa onun
+  // dediği geçerli, rutini dayatma — normal analize düşsün.
+  if(_hasExplicitAmounts(text)) return false;
+  const res=await applyMealRoutine(match.id);
+  if(!res) return false;
+  await _learnRoutineTrigger(match.id, text);
+  showActionToast('⭐ '+res.routine.name+' eklendi','Geri al',
+    ()=>_undoRoutineApply(res.added,res.routine.id));
+  return true;
+}
+
+// ---- Tarif oluşturma -------------------------------------------
+async function yeniTarifOlustur(){
+  const ad=(document.getElementById('yeni-tarif-adi')?.value||'').trim();
+  if(!ad){ showToast('Tarife bir ad ver',true); return; }
+  const r={
+    id:'mr_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),
+    name:ad, type:'recipe', emoji:'🍲',
+    sig:'', triggers:[ad], items:[], yieldG:0, per100:null, portions:{},
+    samples:1, useCount:0, lastUsedAt:null, createdAt:Date.now(),
+  };
+  ST.mealRoutines.push(r);
+  await DB.put('mealRoutines',r);
+  closeModal('modal-yeni-tarif');
+  closeModal('modal-routine-picker');
+  renderBeslenme();
+  openRoutineEdit(r.id);
+}
+
+// Tencere ağırlığı değişince 100 g başına değeri yeniden hesapla
+async function kaydetTencereAgirligi(val){
+  const g=parseFloat(String(val).replace(',','.'));
+  const idx=ST.mealRoutines.findIndex(x=>x.id===_editRoutineId);
+  if(idx===-1) return;
+  const r=ST.mealRoutines[idx];
+  const upd={...r, yieldG: g>0?g:0};
+  upd.per100=_recipePer100(upd.items, upd.yieldG);
+  ST.mealRoutines[idx]=upd;
+  await DB.put('mealRoutines',upd);
+  _renderRoutineEdit();
+  renderBeslenme();
+}
+
 async function applyMealRoutine(routineId){
   const r=ST.mealRoutines.find(x=>x.id===routineId);
   if(!r) return null;
@@ -6451,7 +6683,18 @@ function _renderRoutineEdit(){
   const kcal=Math.round(r.items.reduce((a,i)=>a+(i.calories||0),0));
   body.innerHTML=`
     <input class="form-input" id="routine-name-input" value="${(r.name||'').replace(/"/g,'&quot;')}" style="font-size:14px;padding:11px 12px;margin-bottom:14px">
-    <div style="font-size:12px;color:var(--text2);margin-bottom:8px">İÇERİK — ${kcal} kcal, ${r.samples||1} ölçümün ortalaması</div>
+    ${r.type==='recipe' ? `
+      <div style="border:1px solid var(--accent);background:var(--accent-dim);border-radius:12px;padding:12px;margin-bottom:14px">
+        <div style="font-size:12px;color:var(--text2);margin-bottom:8px">TENCERENİN TAMAMI — pişmiş hâlde tart</div>
+        <input class="form-input" type="number" inputmode="decimal" step="1" min="0" placeholder="örn. 3200"
+               value="${r.yieldG||''}" style="font-size:14px;padding:10px 11px"
+               onchange="kaydetTencereAgirligi(this.value)">
+        ${r.per100 ? `<div style="font-size:13px;font-weight:700;color:var(--accent);margin-top:10px">100 g başına: ${r.per100.kcal} kcal · ${r.per100.protein}p · ${r.per100.carbs}k · ${r.per100.fat}y</div>${Object.keys(r.portions||{}).length ? `<div style="font-size:11.5px;color:var(--text2);margin-top:6px">Öğrenilen porsiyonlar: ${Object.entries(r.portions).map(([kk,vv])=>kk+' = '+vv+'g').join(' · ')}</div>` : ''}` : `<div style="font-size:11.5px;color:var(--text3);margin-top:8px">Malzemeleri ekle ve tencere ağırlığını gir — 100 g başına değer burada çıkacak.</div>`}
+      </div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:8px">MALZEMELER — toplam ${kcal} kcal</div>
+    ` : `
+      <div style="font-size:12px;color:var(--text2);margin-bottom:8px">İÇERİK — ${kcal} kcal, ${r.samples||1} ölçümün ortalaması</div>
+    `}
     <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">
       ${r.items.map((i,ix)=>`<div style="display:flex;align-items:center;gap:8px;padding:9px 11px;border-radius:10px;background:var(--surface2);font-size:13px">
         <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${i.emoji||'🍽️'} ${i.name}${i.fixed?' <span style="color:var(--text3);font-size:11px">· sabit</span>':''}</span>
@@ -6521,6 +6764,8 @@ async function _pushRoutineItems(newItems){
     });
   }
   const upd={...r, items};
+  // Tarifte malzeme değişince 100 g başına değer yeniden hesaplanmalı
+  if(upd.type==='recipe') upd.per100=_recipePer100(upd.items, upd.yieldG);
   ST.mealRoutines[idx]=upd;
   await DB.put('mealRoutines',upd);
   _renderRoutineEdit();
@@ -6575,6 +6820,7 @@ async function removeRoutineItem(ix){
   const r=ST.mealRoutines[idx];
   if(r.items.length<=1){ showToast('Rutinde en az bir kalem kalmalı',true); return; }
   const upd={...r, items:r.items.filter((_,i)=>i!==ix)};
+  if(upd.type==='recipe') upd.per100=_recipePer100(upd.items, upd.yieldG);
   ST.mealRoutines[idx]=upd;
   await DB.put('mealRoutines',upd);
   _renderRoutineEdit();
@@ -6624,10 +6870,10 @@ function _renderRoutinePicker(listOnly){
     const kcal=Math.round(r.items.reduce((a,i)=>a+(i.calories||0),0));
     return `<div style="display:flex;align-items:center;gap:8px;padding:10px 11px;border-radius:10px;background:var(--surface2);border:1.5px solid var(--accent)">
       <button onclick="applyRoutineFromPicker('${r.id}')" style="flex:1;min-width:0;display:flex;align-items:center;gap:9px;background:transparent;border:none;cursor:pointer;text-align:left;padding:0">
-        <span style="font-size:15px;flex-shrink:0">⭐</span>
+        <span style="font-size:15px;flex-shrink:0">${r.type==='recipe'?'🍲':'⭐'}</span>
         <span style="flex:1;min-width:0">
           <span style="display:block;font-size:13.5px;font-weight:700;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.name}</span>
-          <span style="display:block;font-size:11px;color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.items.map(i=>i.name).join(' + ')}</span>
+          <span style="display:block;font-size:11px;color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.type==='recipe' ? (r.per100?('100g = '+r.per100.kcal+' kcal'):'tencere ağırlığı girilmedi') : r.items.map(i=>i.name).join(' + ')}</span>
         </span>
         <span style="font-size:12px;color:var(--text2);flex-shrink:0">${kcal} kcal</span>
       </button>
@@ -6639,6 +6885,8 @@ function _renderRoutinePicker(listOnly){
   const el=document.getElementById('routine-pick-list');
   if(listOnly && el){ el.innerHTML=rows; return; }
   document.getElementById('routine-picker-content').innerHTML=`
+    <button class="btn btn-primary btn-full" style="margin-bottom:12px"
+      onclick="document.getElementById('yeni-tarif-adi').value='';openModal('modal-yeni-tarif')">🍲 Kendi tarifini ekle</button>
     <input id="routine-pick-search" class="form-input" placeholder="Rutin ara..." autocomplete="off"
            style="font-size:14px;padding:10px 12px;margin-bottom:12px" oninput="onRoutinePickSearch(this.value)">
     <div id="routine-pick-list" style="display:flex;flex-direction:column;gap:6px;max-height:54vh;overflow-y:auto">${rows}</div>`;
@@ -6651,6 +6899,18 @@ async function applyRoutineFromPicker(id){
 
 // Çipe basınca rutini uygula (geri alma seçenekli)
 async function applyRoutineFromChip(id){
+  const r=ST.mealRoutines.find(x=>x.id===id); if(!r) return;
+  // Tarifte ne kadar yediğini bilmiyoruz: öğrenilmiş porsiyon varsa onu
+  // kullan, yoksa sor. Rutin sabit porsiyon taşıdığı için doğrudan eklenir.
+  if(r.type==='recipe'){
+    if(!r.per100){ showToast('Önce tencere ağırlığını gir',true); openRoutineEdit(id); return; }
+    const kap=Object.keys(r.portions||{})[0];
+    if(!kap){ sorPorsiyon(id,'porsiyon',''); return; }
+    const res=await applyMealRecipe(id, r.portions[kap]);
+    if(res) showActionToast('📐 '+res.routine.name+' eklendi ('+Math.round(r.portions[kap])+'g)','Geri al',
+      ()=>_undoRoutineApply(res.added,res.routine.id));
+    return;
+  }
   const res=await applyMealRoutine(id);
   if(!res) return;
   showActionToast('⭐ '+res.routine.name+' eklendi','Geri al',

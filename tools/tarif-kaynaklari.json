@@ -1,0 +1,69 @@
+{
+  "_not": "Pilot: yöntemi doğrulamak için az sayıda yemek. Sayılar makul çıkarsa liste genişletilecek.",
+  "yemekler": [
+    {
+      "ad": "mercimek çorbası",
+      "kategori": "corba",
+      "esanlamlilar": [
+        "kırmızı mercimek çorbası",
+        "mercimek corbasi",
+        "süzme mercimek çorbası"
+      ],
+      "kaynaklar": [
+        "https://yemek.com/tarif/mercimek-corbasi/",
+        "https://yemek.com/tarif/kolay-mercimek-corbasi/",
+        "https://www.lezzet.com.tr/yemek-tarifleri/corbalar/corba-tarifleri/mercimek-corbasi",
+        "https://www.kevserinmutfagi.com/en-kolay-mercimek-corbasi.html",
+        "https://www.kisikatesakademi.com.tr/tarif/mercimek-corbasi-tarifi-566",
+        "https://hayfene.com/blog/mercimek-corbasi-tarifi"
+      ]
+    },
+    {
+      "ad": "ezogelin çorbası",
+      "kategori": "corba",
+      "esanlamlilar": [
+        "ezogelin"
+      ],
+      "kaynaklar": [
+        "https://yemek.com/tarif/ezogelin-corbasi/",
+        "https://www.nefisyemektarifleri.com/ezogelin-corbasi-tarifi/"
+      ]
+    },
+    {
+      "ad": "kuru fasulye",
+      "kategori": "yemek",
+      "esanlamlilar": [
+        "fasulye",
+        "etli kuru fasulye"
+      ],
+      "kaynaklar": [
+        "https://yemek.com/tarif/kuru-fasulye/",
+        "https://www.nefisyemektarifleri.com/kuru-fasulye-tarifi/"
+      ]
+    },
+    {
+      "ad": "pirinç pilavı",
+      "kategori": "pilav",
+      "esanlamlilar": [
+        "pilav",
+        "tereyağlı pilav",
+        "sade pilav"
+      ],
+      "kaynaklar": [
+        "https://yemek.com/tarif/pirinc-pilavi/",
+        "https://www.nefisyemektarifleri.com/pirinc-pilavi-tarifi/"
+      ]
+    },
+    {
+      "ad": "menemen",
+      "kategori": "yemek",
+      "esanlamlilar": [
+        "menemen kahvaltı"
+      ],
+      "kaynaklar": [
+        "https://yemek.com/tarif/menemen/",
+        "https://www.nefisyemektarifleri.com/menemen-tarifi/"
+      ]
+    }
+  ]
+}
