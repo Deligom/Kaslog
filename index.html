@@ -1025,8 +1025,14 @@ canvas{width:100%;height:100%;}
       <button class="modal-close" onclick="closeModal('modal-changelog')">✕</button>
     </div>
     <div class="modal-body" style="font-size:13.5px;line-height:1.65">
-      <div style="font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:700;color:var(--accent);margin-bottom:2px">v2.5 beta <span style="font-size:11px;color:var(--text3);font-weight:500">· build 2026-08-21.1</span></div>
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:700;color:var(--accent);margin-bottom:2px">v2.5 beta <span style="font-size:11px;color:var(--text3);font-weight:500">· build 2026-08-22.2</span></div>
       <ul style="padding-left:18px;margin:0 0 16px;color:var(--text2)">
+        <li><b>"Bu bir tarif mi?"</b> — tencere tarifi yazdığında günlük toplamına eklemek yerine tarif olarak kaydetmeyi öneriyor</li>
+        <li>"1 kase X" artık paketli ham ürüne eşleşmiyor; pişmiş yemek olarak yorumlanıyor</li>
+        <li>Rutin uygulanınca kalemler tek kart olarak ekleniyor (ayrı ayrı satır oluyordu)</li>
+        <li>"Geri al" tuşunda metin artık sığıyor ve rakamsız geri sayım çubuğu var</li>
+        <li>Bozuk/eski rutinler artık listeden silinebiliyor</li>
+        <li>Bakliyat ve tahıllarda kuru/pişmiş ayrımı: "300gr mercimek" artık kuru sayılıyor</li>
         <li><b>Kendi tarifin:</b> malzemeleri bir kez gir, tencereyi tart — sonrasında sadece kaseyi tartman yeter, tahmin yok</li>
         <li>Porsiyon hafızası: "1 kase" senin için kaç gram, bir kez sorulur</li>
         <li>Ürün aramada kelime sınırı hatası düzeldi ("su" yazınca "Sütaş Tereyağı" gelebiliyordu)</li>
@@ -1146,6 +1152,23 @@ canvas{width:100%;height:100%;}
   </div>
 </div>
 
+<!-- Tarif mi, öğün mü? -->
+<div class="modal-backdrop center-dialog" id="modal-tarif-mi">
+  <div class="dialog-box" style="max-width:360px;width:93%">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:800;margin-bottom:6px">🍲 Bu bir tarif mi?</div>
+    <div id="tarifmi-ozet" style="font-size:13px;color:var(--accent);font-weight:700;margin-bottom:6px"></div>
+    <div id="tarifmi-liste" style="font-size:11.5px;color:var(--text3);line-height:1.5;margin-bottom:14px"></div>
+    <div style="font-size:12.5px;color:var(--text2);line-height:1.55;margin-bottom:14px">
+      Tarif olarak kaydedersem günlük toplamına eklenmez. Tencereyi tartınca
+      her kaseyi tartıyla kesin hesaplarım.
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <button class="btn btn-primary btn-full" onclick="tarifMiCevap('tarif')">🍲 Tarif olarak kaydet</button>
+      <button class="btn btn-ghost btn-full" onclick="tarifMiCevap('ogun')">Hepsini yedim, öğün olarak ekle</button>
+    </div>
+  </div>
+</div>
+
 <!-- Porsiyon hafızası: "1 kase" senin için kaç gram? Bir kez sorulur. -->
 <div class="modal-backdrop center-dialog" id="modal-porsiyon">
   <div class="dialog-box" style="max-width:340px;width:92%">
@@ -1231,7 +1254,7 @@ canvas{width:100%;height:100%;}
 // ── SÜRÜM DAMGASI ─────────────────────────────────────────────
 // Her yeni build'de BUILD değerini artır. Ayarlar'ın en altında görünür.
 const APP_VERSION = '2.5 beta';
-const APP_BUILD   = '2026-08-21.1';
+const APP_BUILD   = '2026-08-22.2';
 const PROXY_URL = 'https://kaslog19.vercel.app/api/gemini';
 
 // GÜVENLİK NOTU (v2.4):
@@ -5583,6 +5606,12 @@ Kurallar:
     yemek/çorba/tabak (mercimek çorbası, kuru fasulye, menemen, döner, pide).
     Bu tür yemeklerde kendi tahminin daha isabetli olur.
 2c. items[].grams: o kalemin gram cinsinden ağırlığı (sıvılarda ml≈g say). Bilmiyorsan makul tahmin et.
+2d. KURU/PİŞMİŞ AYRIMI — en sık yapılan hata budur. Bakliyat (mercimek,
+    nohut, fasulye), pirinç, bulgur, makarna, yulaf gibi malzemelerde
+    kullanıcının yazdığı gramaj KURU ağırlıktır; "pişmiş/haşlanmış" demedikçe
+    KURU değerlerden hesapla. 300 g kuru mercimek ~1056 kcal ve ~74 g
+    proteindir; pişmiş sanılırsa ~350 kcal ve ~27 g protein çıkar ve sonuç
+    üçte birine düşer.
 3. items: Girişteki HER AYRI YİYECEK için bir kalem. "250ml süt 50gr gevrek" → 2 kalem.
    Tek yiyecek varsa tek kalemlik dizi döndür.
 4. items[].name: Türkçe isim + miktar (örn: "Süt 250ml", "Kahvaltılık Gevrek 50g").
@@ -5798,7 +5827,11 @@ async function _processNutQueue() {
     // Rutin adayı varsa lokal aramayı ATLA: yoksa foodDb tek bir ürünü kapıp
     // rutini gölgeler ve AI'nın karar verme şansı hiç doğmaz.
     const { candidates } = _matchMealRoutine(text);
-    const skipCascade = _looksMultiFood(text) || candidates.length > 0;
+    // "1 kase kırmızı mercimek" yazan kişi PİŞMİŞ bir yemek kastediyor.
+    // Ham/paketli ürüne eşleşirse 100 g KURU mercimeğin değerleri yazılıyordu
+    // (320 kcal, 26 g protein) — hem miktar hem içerik yanlış oluyordu.
+    const kapVar = !!_portionWord(text);
+    const skipCascade = _looksMultiFood(text) || candidates.length > 0 || kapVar;
     const resolved = skipCascade ? null : await _cascadeResolveText(text);
     if (resolved) {
       const idx = ST.nutritionLogs.findIndex(e => e.id === pendingId);
@@ -5859,6 +5892,16 @@ async function _processNutQueue() {
     if (await _applyRoutineIfPicked(parsed, pendingId, text)) {
       await _dropBgJob(pendingId);
       renderBeslenme();
+      await new Promise(r => setTimeout(r, 100));
+      _processNutQueue();
+      return;
+    }
+
+    // Tarif mi öğün mü? Emin değilsek kullanıcıya soralım — yanlış karar
+    // günlük toplamı yüzlerce kalori şişiriyor.
+    if (_tarifGibiMi(text, parsed.items)) {
+      await _dropBgJob(pendingId);
+      sorTarifMi(parsed, pendingId, text);
       await new Promise(r => setTimeout(r, 100));
       _processNutQueue();
       return;
@@ -6226,6 +6269,71 @@ function _matchMealRoutine(text){
  * Rutin kararı ayrı bir çağrıda değil, zaten yapılan analiz çağrısında
  * alınıyor — ek maliyet yok. Uygulandıysa true döner.
  */
+/**
+ * Yazılan metin bir TARİF mi anlatıyor, yoksa yenen bir ÖĞÜN mü?
+ * Kullanıcı tencere tarifini beslenme kutusuna yazdığında uygulama bunu
+ * yediği öğün sanıp günlük toplamına ekliyordu (869 kcal). Dört ve üzeri
+ * ayrı malzeme + porsiyon sözcüğü olmaması tarif işaretidir.
+ */
+function _tarifGibiMi(text, items){
+  if(!Array.isArray(items) || items.length < 4) return false;
+  if(_portionWord(text)) return false;          // "1 kase ..." → yediğini anlatıyor
+  // Ayırt edici işaret: PORSİYONDA tek ölçü olur ("300gr çorba"), TARİFTE
+  // her malzemenin kendi ölçüsü vardır ("300gr mercimek, 3 diş sarımsak,
+  // 7 su bardağı su"). Sadece gramaj varlığına bakmak yanlıştı — tarifler
+  // de gramaj içeriyor ve hiçbir tarif algılanamıyordu.
+  const olcuSayisi = (String(text).match(
+    /[0-9]+(?:[.,][0-9]+)?[ ]*(?:g|gr|gram|ml|lt|litre|adet|di[sş]|tane|demet|ka[sş][ıi][kğ]|barda[kğ]|paket|dilim)/gi) || []).length;
+  return olcuSayisi >= 3;
+}
+
+let _tarifKarari=null;   // {parsed, pendingId, text}
+
+function sorTarifMi(parsed, pendingId, text){
+  _tarifKarari={parsed, pendingId, text};
+  const items=parsed.items||[];
+  const kcal=Math.round(items.reduce((a,i)=>a+(+i.kcal||0),0));
+  document.getElementById('tarifmi-ozet').textContent=
+    items.length+' malzeme · toplam '+kcal+' kcal';
+  document.getElementById('tarifmi-liste').textContent=
+    items.map(i=>i.name).join(' · ');
+  openModal('modal-tarif-mi');
+}
+
+async function tarifMiCevap(secim){
+  const b=_tarifKarari; if(!b) { closeModal('modal-tarif-mi'); return; }
+  _tarifKarari=null;
+  closeModal('modal-tarif-mi');
+  if(secim==='ogun'){
+    await _writeParsedMeal(b.pendingId, b.parsed, b.text);
+    renderBeslenme();
+    return;
+  }
+  // Tarif olarak kaydet: bekleyen kaydı sil, tarifi oluştur, tencere
+  // ağırlığını isteyebilmek için düzenleme ekranını aç.
+  await DB.del('nutritionLogs', b.pendingId);
+  ST.nutritionLogs=ST.nutritionLogs.filter(e=>e.id!==b.pendingId);
+  const items=(b.parsed.items||[]).map(i=>{
+    const p=_splitPortionFromName(i.name||'');
+    return { key:'m:'+_foodNorm(i.name||'').replace(/d+/g,' ').replace(/s+/g,' ').trim(),
+      foodId:null, base:p.base, portionQty:p.qty, portionUnit:p.unit,
+      name:_portionName(p.base,p.qty,p.unit), emoji:i.emoji||'🍽️',
+      calories:Math.round(+i.kcal||0), protein:Math.round((+i.protein||0)*10)/10,
+      carbs:Math.round((+i.carbs||0)*10)/10, fat:Math.round((+i.fat||0)*10)/10,
+      portionNote:'', samples:1, fixed:true };
+  });
+  const r={ id:'mr_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),
+    name:b.parsed.name||b.text.slice(0,40), type:'recipe', emoji:b.parsed.emoji||'🍲',
+    sig:'', triggers:[b.parsed.name||b.text.slice(0,40)], items,
+    yieldG:0, per100:null, portions:{}, samples:1, useCount:0, lastUsedAt:null,
+    createdAt:Date.now() };
+  ST.mealRoutines.push(r);
+  await DB.put('mealRoutines', r);
+  renderBeslenme();
+  showToast('🍲 Tarif kaydedildi — şimdi tencere ağırlığını gir');
+  openRoutineEdit(r.id);
+}
+
 async function _applyRoutineIfPicked(parsed, pendingId, text){
   const id=parsed?.routineId;
   if(!id || !ST.mealRoutines.some(r=>r.id===id)) return false;
@@ -6432,9 +6540,16 @@ async function kaydetTencereAgirligi(val){
 
 async function applyMealRoutine(routineId){
   const r=ST.mealRoutines.find(x=>x.id===routineId);
-  if(!r) return null;
+  if(!r || !Array.isArray(r.items)) return null;
   const added=[];
   let i=0;
+  // Çok kalemli rutin TEK KART olarak görünmeli. Eskiden groupId
+  // verilmediği için süt ve gevrek ayrı ayrı satır oluyordu — oysa
+  // kullanıcı onları tek öğün olarak kaydetmişti.
+  const grup = r.items.length>1
+    ? { groupId:'g_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),
+        groupName:r.name, groupEmoji:r.emoji||r.items[0]?.emoji||'🍽️' }
+    : {};
   for(const it of r.items){
     const entry={
       id:'n_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),
@@ -6449,6 +6564,7 @@ async function applyMealRoutine(routineId){
       matchSource:'routine', routineId:r.id,
       foodId:it.foodId||null, pending:false,
       createdAt:Date.now()+(i++),   // sıralama korunsun
+      ...grup,
     };
     await DB.put('nutritionLogs',entry);
     ST.nutritionLogs.push(entry);
@@ -6610,21 +6726,51 @@ function showActionToast(msg, actionLabel, onAction, ms=6000){
       +'bottom:calc(var(--nav-h) + var(--safe-bot) + 16px);z-index:10000;display:flex;align-items:center;'
       +'gap:12px;padding:11px 14px;border-radius:14px;background:var(--surface2);border:1px solid var(--border);'
       +'box-shadow:0 6px 24px rgba(0,0,0,0.35);opacity:0;transition:opacity .25s,transform .25s;'
-      +'max-width:92vw;font-size:13.5px;font-weight:600;color:var(--text)';
+      // Kesin genişlik şart: içerik kadar genişleyen bir kapta çocukların
+      // %100 genişliği çözümsüz kalıp 0px'e çöküyordu (geri sayım çubuğu
+      // görünmüyordu).
+      +'width:min(92vw,430px);font-size:13.5px;font-weight:600;color:var(--text)';
     document.body.appendChild(el);
   }
   el.innerHTML='';
+  // Metin tek satıra sıkıştırılıp kesiliyordu ("Akşam rutini ekl..."),
+  // uzun rutin adları okunamıyordu. İki satıra kadar sarsın.
+  const satir=document.createElement('div');
+  satir.style.cssText='display:flex;align-items:center;gap:12px;width:100%';
   const txt=document.createElement('span');
   txt.textContent=msg;
-  txt.style.cssText='flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+  txt.style.cssText='flex:1;min-width:0;line-height:1.35;display:-webkit-box;'
+    +'-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden';
   const btn=document.createElement('button');
   btn.textContent=actionLabel;
   btn.style.cssText='flex-shrink:0;padding:6px 12px;border-radius:20px;border:1.5px solid var(--accent);'
     +'background:transparent;color:var(--accent);font-size:12.5px;font-weight:700;cursor:pointer';
   btn.onclick=async()=>{ hide(); await onAction(); };
-  el.append(txt,btn);
+  satir.append(txt,btn);
 
-  requestAnimationFrame(()=>{ el.style.opacity='1'; el.style.transform='translateX(-50%) translateY(0)'; });
+  // Rakamsız geri sayım: kullanıcı tuşun ne zaman kaybolacağını görsün.
+  // Renk de akrepten kırmızıya döner, süre azaldıkça aciliyet artar.
+  const yol=document.createElement('div');
+  yol.style.cssText='width:100%;height:3px;border-radius:2px;background:var(--border);'
+    +'margin-top:9px;overflow:hidden';
+  const dolgu=document.createElement('div');
+  dolgu.style.cssText='height:100%;width:100%;border-radius:2px;background:var(--accent);'
+    +'transform-origin:left center;transition:transform '+ms+'ms linear, background-color '+ms+'ms linear';
+  yol.appendChild(dolgu);
+
+  el.style.flexDirection='column';
+  el.style.alignItems='stretch';
+  el.append(satir,yol);
+
+  requestAnimationFrame(()=>{
+    el.style.opacity='1'; el.style.transform='translateX(-50%) translateY(0)';
+  });
+  // Geçişin başlaması için tarayıcının BAŞLANGIÇ değerini görmesi gerek.
+  // İç içe requestAnimationFrame bunu garanti etmiyordu; reflow'u zorluyoruz.
+  dolgu.style.transform='scaleX(1)';
+  void dolgu.offsetWidth;
+  dolgu.style.transform='scaleX(0)';
+  dolgu.style.backgroundColor='var(--danger)';
   clearTimeout(_actionToastTimer);
   _actionToastTimer=setTimeout(hide, ms);
   function hide(){
@@ -6680,6 +6826,9 @@ function openRoutineEdit(id){
 function _renderRoutineEdit(){
   const r=ST.mealRoutines.find(x=>x.id===_editRoutineId); if(!r) return;
   const body=document.getElementById('routine-edit-content');
+  // Eski sürümlerden kalan kayıtlarda items eksik olabiliyor; burada
+  // patlarsa modal hiç açılmıyor ve kullanıcı rutini SİLEMİYORDU.
+  if(!Array.isArray(r.items)) r.items=[];
   const kcal=Math.round(r.items.reduce((a,i)=>a+(i.calories||0),0));
   body.innerHTML=`
     <input class="form-input" id="routine-name-input" value="${(r.name||'').replace(/"/g,'&quot;')}" style="font-size:14px;padding:11px 12px;margin-bottom:14px">
@@ -6867,7 +7016,7 @@ function _renderRoutinePicker(listOnly){
     .sort((a,b)=>(b.useCount||0)-(a.useCount||0) || (b.lastUsedAt||0)-(a.lastUsedAt||0));
 
   const rows=list.length?list.map(r=>{
-    const kcal=Math.round(r.items.reduce((a,i)=>a+(i.calories||0),0));
+    const kcal=Math.round((r.items||[]).reduce((a,i)=>a+(i.calories||0),0));
     return `<div style="display:flex;align-items:center;gap:8px;padding:10px 11px;border-radius:10px;background:var(--surface2);border:1.5px solid var(--accent)">
       <button onclick="applyRoutineFromPicker('${r.id}')" style="flex:1;min-width:0;display:flex;align-items:center;gap:9px;background:transparent;border:none;cursor:pointer;text-align:left;padding:0">
         <span style="font-size:15px;flex-shrink:0">${r.type==='recipe'?'🍲':'⭐'}</span>
@@ -6878,6 +7027,7 @@ function _renderRoutinePicker(listOnly){
         <span style="font-size:12px;color:var(--text2);flex-shrink:0">${kcal} kcal</span>
       </button>
       <button onclick="closeModal('modal-routine-picker');openRoutineEdit('${r.id}')" title="Düzenle" style="flex-shrink:0;background:transparent;border:none;color:var(--text3);font-size:16px;cursor:pointer;padding:4px 6px">✎</button>
+      <button onclick="silRutinListeden('${r.id}')" title="Sil" style="flex-shrink:0;background:transparent;border:none;color:var(--danger);font-size:15px;cursor:pointer;padding:4px 6px">🗑</button>
     </div>`;
   }).join('')
   : `<div style="font-size:13px;color:var(--text3);padding:18px 0;text-align:center">${q?'Eşleşen rutin yok.':'Henüz rutin yok.'}</div>`;
@@ -6890,6 +7040,17 @@ function _renderRoutinePicker(listOnly){
     <input id="routine-pick-search" class="form-input" placeholder="Rutin ara..." autocomplete="off"
            style="font-size:14px;padding:10px 12px;margin-bottom:12px" oninput="onRoutinePickSearch(this.value)">
     <div id="routine-pick-list" style="display:flex;flex-direction:column;gap:6px;max-height:54vh;overflow-y:auto">${rows}</div>`;
+}
+
+// Listeden doğrudan silme: bozuk kayıtlar düzenleme ekranını açamadığı
+// için silinemez hâlde kalıyordu.
+async function silRutinListeden(id){
+  const r=ST.mealRoutines.find(x=>x.id===id);
+  showConfirm('🗑️','Rutini sil', (r?.name||'Bu rutin')+' silinsin mi? Geçmiş öğünlerin etkilenmez.', async()=>{
+    closeModal('modal-alert');
+    await deleteMealRoutine(id);
+    _renderRoutinePicker();
+  });
 }
 
 async function applyRoutineFromPicker(id){
