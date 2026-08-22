@@ -1025,8 +1025,10 @@ canvas{width:100%;height:100%;}
       <button class="modal-close" onclick="closeModal('modal-changelog')">✕</button>
     </div>
     <div class="modal-body" style="font-size:13.5px;line-height:1.65">
-      <div style="font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:700;color:var(--accent);margin-bottom:2px">v2.5 beta <span style="font-size:11px;color:var(--text3);font-weight:500">· build 2026-08-22.1</span></div>
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:700;color:var(--accent);margin-bottom:2px">v2.5 beta <span style="font-size:11px;color:var(--text3);font-weight:500">· build 2026-08-22.2</span></div>
       <ul style="padding-left:18px;margin:0 0 16px;color:var(--text2)">
+        <li><b>"Bu bir tarif mi?"</b> — tencere tarifi yazdığında günlük toplamına eklemek yerine tarif olarak kaydetmeyi öneriyor</li>
+        <li>"1 kase X" artık paketli ham ürüne eşleşmiyor; pişmiş yemek olarak yorumlanıyor</li>
         <li>Rutin uygulanınca kalemler tek kart olarak ekleniyor (ayrı ayrı satır oluyordu)</li>
         <li>"Geri al" tuşunda metin artık sığıyor ve rakamsız geri sayım çubuğu var</li>
         <li>Bozuk/eski rutinler artık listeden silinebiliyor</li>
@@ -1150,6 +1152,23 @@ canvas{width:100%;height:100%;}
   </div>
 </div>
 
+<!-- Tarif mi, öğün mü? -->
+<div class="modal-backdrop center-dialog" id="modal-tarif-mi">
+  <div class="dialog-box" style="max-width:360px;width:93%">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:800;margin-bottom:6px">🍲 Bu bir tarif mi?</div>
+    <div id="tarifmi-ozet" style="font-size:13px;color:var(--accent);font-weight:700;margin-bottom:6px"></div>
+    <div id="tarifmi-liste" style="font-size:11.5px;color:var(--text3);line-height:1.5;margin-bottom:14px"></div>
+    <div style="font-size:12.5px;color:var(--text2);line-height:1.55;margin-bottom:14px">
+      Tarif olarak kaydedersem günlük toplamına eklenmez. Tencereyi tartınca
+      her kaseyi tartıyla kesin hesaplarım.
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <button class="btn btn-primary btn-full" onclick="tarifMiCevap('tarif')">🍲 Tarif olarak kaydet</button>
+      <button class="btn btn-ghost btn-full" onclick="tarifMiCevap('ogun')">Hepsini yedim, öğün olarak ekle</button>
+    </div>
+  </div>
+</div>
+
 <!-- Porsiyon hafızası: "1 kase" senin için kaç gram? Bir kez sorulur. -->
 <div class="modal-backdrop center-dialog" id="modal-porsiyon">
   <div class="dialog-box" style="max-width:340px;width:92%">
@@ -1235,7 +1254,7 @@ canvas{width:100%;height:100%;}
 // ── SÜRÜM DAMGASI ─────────────────────────────────────────────
 // Her yeni build'de BUILD değerini artır. Ayarlar'ın en altında görünür.
 const APP_VERSION = '2.5 beta';
-const APP_BUILD   = '2026-08-22.1';
+const APP_BUILD   = '2026-08-22.2';
 const PROXY_URL = 'https://kaslog19.vercel.app/api/gemini';
 
 // GÜVENLİK NOTU (v2.4):
@@ -5808,7 +5827,11 @@ async function _processNutQueue() {
     // Rutin adayı varsa lokal aramayı ATLA: yoksa foodDb tek bir ürünü kapıp
     // rutini gölgeler ve AI'nın karar verme şansı hiç doğmaz.
     const { candidates } = _matchMealRoutine(text);
-    const skipCascade = _looksMultiFood(text) || candidates.length > 0;
+    // "1 kase kırmızı mercimek" yazan kişi PİŞMİŞ bir yemek kastediyor.
+    // Ham/paketli ürüne eşleşirse 100 g KURU mercimeğin değerleri yazılıyordu
+    // (320 kcal, 26 g protein) — hem miktar hem içerik yanlış oluyordu.
+    const kapVar = !!_portionWord(text);
+    const skipCascade = _looksMultiFood(text) || candidates.length > 0 || kapVar;
     const resolved = skipCascade ? null : await _cascadeResolveText(text);
     if (resolved) {
       const idx = ST.nutritionLogs.findIndex(e => e.id === pendingId);
@@ -5869,6 +5892,16 @@ async function _processNutQueue() {
     if (await _applyRoutineIfPicked(parsed, pendingId, text)) {
       await _dropBgJob(pendingId);
       renderBeslenme();
+      await new Promise(r => setTimeout(r, 100));
+      _processNutQueue();
+      return;
+    }
+
+    // Tarif mi öğün mü? Emin değilsek kullanıcıya soralım — yanlış karar
+    // günlük toplamı yüzlerce kalori şişiriyor.
+    if (_tarifGibiMi(text, parsed.items)) {
+      await _dropBgJob(pendingId);
+      sorTarifMi(parsed, pendingId, text);
       await new Promise(r => setTimeout(r, 100));
       _processNutQueue();
       return;
@@ -6236,6 +6269,71 @@ function _matchMealRoutine(text){
  * Rutin kararı ayrı bir çağrıda değil, zaten yapılan analiz çağrısında
  * alınıyor — ek maliyet yok. Uygulandıysa true döner.
  */
+/**
+ * Yazılan metin bir TARİF mi anlatıyor, yoksa yenen bir ÖĞÜN mü?
+ * Kullanıcı tencere tarifini beslenme kutusuna yazdığında uygulama bunu
+ * yediği öğün sanıp günlük toplamına ekliyordu (869 kcal). Dört ve üzeri
+ * ayrı malzeme + porsiyon sözcüğü olmaması tarif işaretidir.
+ */
+function _tarifGibiMi(text, items){
+  if(!Array.isArray(items) || items.length < 4) return false;
+  if(_portionWord(text)) return false;          // "1 kase ..." → yediğini anlatıyor
+  // Ayırt edici işaret: PORSİYONDA tek ölçü olur ("300gr çorba"), TARİFTE
+  // her malzemenin kendi ölçüsü vardır ("300gr mercimek, 3 diş sarımsak,
+  // 7 su bardağı su"). Sadece gramaj varlığına bakmak yanlıştı — tarifler
+  // de gramaj içeriyor ve hiçbir tarif algılanamıyordu.
+  const olcuSayisi = (String(text).match(
+    /[0-9]+(?:[.,][0-9]+)?[ ]*(?:g|gr|gram|ml|lt|litre|adet|di[sş]|tane|demet|ka[sş][ıi][kğ]|barda[kğ]|paket|dilim)/gi) || []).length;
+  return olcuSayisi >= 3;
+}
+
+let _tarifKarari=null;   // {parsed, pendingId, text}
+
+function sorTarifMi(parsed, pendingId, text){
+  _tarifKarari={parsed, pendingId, text};
+  const items=parsed.items||[];
+  const kcal=Math.round(items.reduce((a,i)=>a+(+i.kcal||0),0));
+  document.getElementById('tarifmi-ozet').textContent=
+    items.length+' malzeme · toplam '+kcal+' kcal';
+  document.getElementById('tarifmi-liste').textContent=
+    items.map(i=>i.name).join(' · ');
+  openModal('modal-tarif-mi');
+}
+
+async function tarifMiCevap(secim){
+  const b=_tarifKarari; if(!b) { closeModal('modal-tarif-mi'); return; }
+  _tarifKarari=null;
+  closeModal('modal-tarif-mi');
+  if(secim==='ogun'){
+    await _writeParsedMeal(b.pendingId, b.parsed, b.text);
+    renderBeslenme();
+    return;
+  }
+  // Tarif olarak kaydet: bekleyen kaydı sil, tarifi oluştur, tencere
+  // ağırlığını isteyebilmek için düzenleme ekranını aç.
+  await DB.del('nutritionLogs', b.pendingId);
+  ST.nutritionLogs=ST.nutritionLogs.filter(e=>e.id!==b.pendingId);
+  const items=(b.parsed.items||[]).map(i=>{
+    const p=_splitPortionFromName(i.name||'');
+    return { key:'m:'+_foodNorm(i.name||'').replace(/d+/g,' ').replace(/s+/g,' ').trim(),
+      foodId:null, base:p.base, portionQty:p.qty, portionUnit:p.unit,
+      name:_portionName(p.base,p.qty,p.unit), emoji:i.emoji||'🍽️',
+      calories:Math.round(+i.kcal||0), protein:Math.round((+i.protein||0)*10)/10,
+      carbs:Math.round((+i.carbs||0)*10)/10, fat:Math.round((+i.fat||0)*10)/10,
+      portionNote:'', samples:1, fixed:true };
+  });
+  const r={ id:'mr_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),
+    name:b.parsed.name||b.text.slice(0,40), type:'recipe', emoji:b.parsed.emoji||'🍲',
+    sig:'', triggers:[b.parsed.name||b.text.slice(0,40)], items,
+    yieldG:0, per100:null, portions:{}, samples:1, useCount:0, lastUsedAt:null,
+    createdAt:Date.now() };
+  ST.mealRoutines.push(r);
+  await DB.put('mealRoutines', r);
+  renderBeslenme();
+  showToast('🍲 Tarif kaydedildi — şimdi tencere ağırlığını gir');
+  openRoutineEdit(r.id);
+}
+
 async function _applyRoutineIfPicked(parsed, pendingId, text){
   const id=parsed?.routineId;
   if(!id || !ST.mealRoutines.some(r=>r.id===id)) return false;
