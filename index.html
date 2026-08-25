@@ -1366,6 +1366,11 @@ const STRINGS = {
     today_workout:"Bugünkü Antrenman", start_workout:"Antrenmanı Başlat",
     rest_day:"Dinlenme Günü", rest_day_sub:"Kaslar dinlenirken büyür.",
     tomorrow:"Yarın", train_anyway:"Yine de Antrenman Yap →",
+    done_today:"Bugün Tamamlandı", done_today_sub:"Bugünün işi bitti — şimdi sıra toparlanmada.",
+    train_again:"Bir antrenman daha yap →", done_stat_vol:"hacim", done_stat_set:"set", done_stat_min:"dk",
+    break_title:"Tekrar hoş geldin!", break_days:"gündür ara verdin.",
+    break_rewound:"Döngüyü başa sardım — temiz sayfa.", break_continue:"Kaldığım yerden devam et",
+    break_dismiss:"Tamam, başlayalım",
     streak:"Seri", sessions:"Antrenman", volume:"Hacim",
     no_routine:"Rutin Yok", no_routine_sub:"Program sekmesinden rutin oluştur.",
     // program
@@ -1480,6 +1485,11 @@ const STRINGS = {
     today_workout:"Today's Workout", start_workout:"Start Workout",
     rest_day:"Rest Day", rest_day_sub:"Muscles grow while you rest.",
     tomorrow:"Tomorrow", train_anyway:"Train Anyway →",
+    done_today:"Done for Today", done_today_sub:"Today's work is finished — recovery time.",
+    train_again:"Do another session →", done_stat_vol:"volume", done_stat_set:"sets", done_stat_min:"min",
+    break_title:"Welcome back!", break_days:"days off.",
+    break_rewound:"I rewound the cycle — clean slate.", break_continue:"Continue where I left off",
+    break_dismiss:"OK, let's go",
     streak:"Streak", sessions:"Sessions", volume:"Volume",
     no_routine:"No Routine", no_routine_sub:"Create a routine in the Program tab.",
     my_routines:"My Routines", new_routine:"+ New Routine",
@@ -1692,7 +1702,7 @@ function getDefaultRoutines(level) {
 // STATE
 // ============================================================
 let ST = {
-  settings:{name:'',level:'intermediate',goal:'both',restTime:90,theme:'dark',lang:'tr',cyclePosition:0,lastWorkoutDate:null,activeRoutineId:'routine_default',geminiKey:'',geminiModel:'gemini-3-flash-preview',gender:'male',nutritionGoalKcal:0,nutritionGoalProtein:0,soundEnabled:true,hapticEnabled:true,dismissedMealSigs:[],bodyWeight:0},
+  settings:{name:'',level:'intermediate',goal:'both',restTime:90,theme:'dark',lang:'tr',cyclePosition:0,cycleDate:null,breakNotice:null,lastWorkoutDate:null,activeRoutineId:'routine_default',geminiKey:'',geminiModel:'gemini-3-flash-preview',gender:'male',nutritionGoalKcal:0,nutritionGoalProtein:0,soundEnabled:true,hapticEnabled:true,dismissedMealSigs:[],bodyWeight:0},
   routines:[],
   workoutLogs:[],
   measurements:[],
@@ -1754,6 +1764,146 @@ function renderTab(tab) {
 }
 function renderAll(){renderTab(ST.activeTab);updateNavLabels();}
 
+
+// ============================================================
+// GÜN TAKİBİ (DÖNGÜ MOTORU)
+// Kural: dinlenme günleri takvimle tükenir, antrenman günleri seni bekler.
+// cyclePosition = "cycleDate gününün planı". Takvim ilerledikçe sadece
+// dinlenme günleri otomatik yanar; kaçırılan antrenman günü yerinde kalır.
+// ============================================================
+const LONG_BREAK_DAYS = 7;
+
+function dayKey(d){const x=d||new Date();return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;}
+function keyToDate(k){const p=String(k||'').split('-').map(Number);return (p.length===3&&p.every(n=>!isNaN(n)))?new Date(p[0],p[1]-1,p[2]):null;}
+function daysBetween(fromKey,toKey){const a=keyToDate(fromKey),b=keyToDate(toKey);if(!a||!b)return 0;return Math.round((b-a)/86400000);}
+function shiftKey(k,delta){const d=keyToDate(k)||new Date();d.setDate(d.getDate()+delta);return dayKey(d);}
+function activeRoutine(){const r=ST.routines.find(x=>x.id===ST.settings.activeRoutineId);return (r&&r.days&&r.days.length)?r:null;}
+function normPos(p,len){len=len||1;return ((p|0)%len+len)%len;}
+
+// Takvim ilerlemesini uygulayıp verilen günün döngü pozisyonunu bulur (yan etkisiz).
+function resolveCyclePos(routine,atKey){
+  if(!routine||!routine.days||!routine.days.length)return 0;
+  const len=routine.days.length;
+  let pos=normPos(ST.settings.cyclePosition,len);
+  if(!ST.settings.cycleDate)return pos;
+  let elapsed=daysBetween(ST.settings.cycleDate,atKey||dayKey());
+  if(elapsed<=0)return pos;                        // aynı gün ya da çapa ileri tarihli
+  if(routine.days.every(d=>d.isRest))return pos;   // tamamı dinlenme → sonsuz döngüye girme
+  let guard=0;
+  while(elapsed>0&&routine.days[pos].isRest&&guard++<len*2){pos=(pos+1)%len;elapsed--;}
+  return pos;                                       // antrenman gününe gelince durur
+}
+
+// Bugünün pozisyonunu takvime göre ilerlet ve kalıcı yaz. Gün dönümünde de çağrılır.
+async function syncCycle(){
+  const routine=activeRoutine(); if(!routine)return false;
+  const s=ST.settings, today=dayKey();
+  let changed=false;
+  if(!s.cycleDate){s.cycleDate=today;changed=true;}
+  if(daysBetween(s.cycleDate,today)>0){
+    const pos=resolveCyclePos(routine,today);
+    if(pos!==normPos(s.cyclePosition,routine.days.length)){s.cyclePosition=pos;changed=true;}
+    s.cycleDate=today;changed=true;
+  }
+  if(applyBreakRewind(routine))changed=true;
+  if(changed)await DB.put('settings',{id:'main',...s});
+  return changed;
+}
+
+function logDayKey(l){const d=l&&l.date?new Date(l.date):null;return (d&&!isNaN(d))?dayKey(d):'';}
+
+function daysSinceLastWorkout(){
+  let latest='';
+  for(const l of ST.workoutLogs){const k=logDayKey(l);if(k>latest)latest=k;}
+  if(!latest)return null;
+  return Math.max(0,daysBetween(latest,dayKey()));
+}
+
+// Uzun ara: 7+ gün antrenman yoksa döngüyü ilk antrenman gününe sar (geri alınabilir).
+function applyBreakRewind(routine){
+  const s=ST.settings, gap=daysSinceLastWorkout();
+  if(gap===null||gap<LONG_BREAK_DAYS){
+    if(s.breakNotice){s.breakNotice=null;return true;}
+    return false;
+  }
+  if(s.breakNotice){
+    if(s.breakNotice.days!==gap){s.breakNotice={...s.breakNotice,days:gap};return true;}
+    return false;
+  }
+  const first=routine.days.findIndex(d=>!d.isRest);
+  if(first<0)return false;
+  s.breakNotice={days:gap,prevPos:normPos(s.cyclePosition,routine.days.length),dismissed:false};
+  s.cyclePosition=first; s.cycleDate=dayKey();
+  return true;
+}
+
+async function undoBreakRewind(){
+  const routine=activeRoutine(); const bn=ST.settings.breakNotice;
+  if(!routine||!bn)return;
+  ST.settings.cyclePosition=normPos(bn.prevPos,routine.days.length);
+  ST.settings.cycleDate=dayKey();
+  ST.settings.breakNotice={...bn,dismissed:true};
+  await DB.put('settings',{id:'main',...ST.settings});
+  renderBugun();
+}
+
+async function dismissBreakNotice(){
+  if(!ST.settings.breakNotice)return;
+  ST.settings.breakNotice={...ST.settings.breakNotice,dismissed:true};
+  await DB.put('settings',{id:'main',...ST.settings});
+  renderBugun();
+}
+
+function todaysLogs(routineId){
+  const key=dayKey();
+  return ST.workoutLogs.filter(l=>logDayKey(l)===key&&(!routineId||l.routineId===routineId));
+}
+
+// Bugün gerçekten ne yapıldı/yapılacak? Log varsa gerçek kazanır, yoksa döngü konuşur.
+function getTodayDayInfo(routine){
+  if(!routine||!routine.days||!routine.days.length)return null;
+  const logs=todaysLogs(routine.id).filter(l=>l.dayId);
+  if(logs.length){
+    const last=logs.reduce((a,b)=>new Date(b.date)>new Date(a.date)?b:a);
+    const idx=routine.days.findIndex(d=>d.id===last.dayId);
+    if(idx>=0)return{pos:idx,day:routine.days[idx],done:true,logs};
+  }
+  const pos=resolveCyclePos(routine,dayKey());
+  return{pos,day:routine.days[pos],done:false,logs:[]};
+}
+
+// pos bugünün planıysa yarın hangi gün? (dinlenme tükenir, antrenman bekler)
+function peekDayAfter(routine,pos){
+  const len=routine.days.length;
+  if(routine.days.every(d=>d.isRest))return routine.days[(pos+1)%len];
+  return routine.days[routine.days[pos].isRest?(pos+1)%len:pos];
+}
+
+// Uygulama gece boyu açık kalırsa gün dönümünü yakala.
+let _lastSeenDay=null;
+async function checkDayRollover(){
+  const today=dayKey();
+  if(_lastSeenDay===today)return;
+  _lastSeenDay=today;
+  await syncCycle();
+  renderAll();
+}
+
+// startPos'tan itibaren ilk antrenman gününü başlat (dinlenmeleri atlar).
+function startTrainingFrom(startPos){
+  const routine=activeRoutine(); if(!routine)return;
+  const len=routine.days.length;
+  for(let i=0;i<len;i++){
+    const d=routine.days[(startPos+i)%len];
+    if(d.isRest)continue;
+    if(!d.exercises||!d.exercises.length){
+      showConfirm('📋',translateDayName(d.name),T('day_empty_sub'),()=>{closeModal('modal-alert');navTo('program');});
+      return;
+    }
+    startWorkout(routine.id,d.id); return;
+  }
+}
+
 // ============================================================
 // BUGÜN
 // ============================================================
@@ -1761,13 +1911,27 @@ function renderBugun() {
   const el=document.getElementById('bugun-content');
   const s=ST.settings;
   const routine=ST.routines.find(r=>r.id===s.activeRoutineId);
-  let todayHTML='';
-  if(routine){
-    const pos=s.cyclePosition%routine.days.length;
-    const day=routine.days[pos];
-    if(day.isRest){
-      const next=routine.days[(pos+1)%routine.days.length];
-      todayHTML=`<div class="rest-day-card"><div class="rest-day-icon">😴</div><div class="rest-day-title">${T('rest_day')}</div><div class="rest-day-sub">${T('rest_day_sub')}<br>${T('tomorrow')}: <strong>${next.emoji} ${next.name}</strong></div><button class="btn btn-ghost btn-full" style="margin-top:20px" onclick="skipRestDay()">${T('train_anyway')}</button></div>`;
+  let todayHTML='', breakHTML='';
+  const info=routine?getTodayDayInfo(routine):null;
+  if(info){
+    const len=routine.days.length;
+    const pos=info.pos;
+    const day=info.day;
+    const bn=s.breakNotice;
+    if(bn&&!bn.dismissed){
+      const prev=routine.days[normPos(bn.prevPos,len)];
+      breakHTML=`<div class="card card-pad" style="margin:0 20px 12px;border:1px solid rgba(59,130,246,0.32);background:linear-gradient(135deg,rgba(59,130,246,0.13),rgba(59,130,246,0.03))"><div style="display:flex;align-items:flex-start;gap:12px"><div style="font-size:26px;line-height:1">👋</div><div style="flex:1"><div style="font-weight:700;font-size:15px;margin-bottom:2px">${T('break_title')}</div><div style="font-size:13px;color:var(--text2);line-height:1.5"><strong>${bn.days}</strong> ${T('break_days')} ${T('break_rewound')}</div></div></div><div style="display:flex;gap:8px;margin-top:12px"><button class="btn btn-ghost" style="flex:1;height:36px;font-size:12px" onclick="undoBreakRewind()">↩️ ${prev.isRest?'😴':prev.emoji} ${T('break_continue')}</button><button class="btn btn-ghost" style="flex:0 0 auto;height:36px;font-size:12px;padding:0 14px" onclick="dismissBreakNotice()">${T('break_dismiss')}</button></div></div>`;
+    }
+    if(info.done){
+      const dVol=info.logs.reduce((a,l)=>a+(l.totalVolume||0),0);
+      const dMin=info.logs.reduce((a,l)=>a+(l.duration||0),0);
+      const dSets=info.logs.reduce((a,l)=>a+(l.exercises||[]).reduce((x,e)=>x+(e.sets||[]).filter(st=>!st.isWarmup).length,0),0);
+      const next=routine.days[(pos+1)%len];
+      const chip=(v,lbl)=>`<div style="flex:1"><div style="font-family:'Barlow Condensed',sans-serif;font-size:26px;font-weight:700;color:var(--success);line-height:1.1">${v}</div><div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">${lbl}</div></div>`;
+      todayHTML=`<div class="rest-day-card" style="border-color:rgba(34,197,94,0.35);background:linear-gradient(180deg,rgba(34,197,94,0.08),transparent)"><div class="rest-day-icon">✅</div><div class="rest-day-title">${T('done_today')}</div><div class="rest-day-sub" style="margin-bottom:4px">${day.emoji} <strong>${translateDayName(day.name)}</strong> — ${T('done_today_sub')}</div><div style="display:flex;gap:8px;margin:18px 0 4px">${chip(dVol>999?Math.round(dVol/1000)+'k':dVol,'kg '+T('done_stat_vol'))}${chip(dSets,T('done_stat_set'))}${chip(dMin,T('done_stat_min'))}</div><div class="rest-day-sub" style="margin-top:14px">${T('tomorrow')}: <strong>${next.isRest?'😴':next.emoji} ${translateDayName(next.name)}</strong></div><button class="btn btn-ghost btn-full" style="margin-top:16px" onclick="startTrainingFrom(${(pos+1)%len})">${T('train_again')}</button></div>`;
+    } else if(day.isRest){
+      const next=peekDayAfter(routine,pos);
+      todayHTML=`<div class="rest-day-card"><div class="rest-day-icon">😴</div><div class="rest-day-title">${T('rest_day')}</div><div class="rest-day-sub">${T('rest_day_sub')}<br>${T('tomorrow')}: <strong>${next.isRest?'😴':next.emoji} ${translateDayName(next.name)}</strong></div><button class="btn btn-ghost btn-full" style="margin-top:20px" onclick="skipRestDay()">${T('train_anyway')}</button></div>`;
     } else {
       const activeExs=day.exercises.filter(e=>!e.disabled);
       const items=day.exercises.map((de,i)=>{
@@ -1782,7 +1946,7 @@ function renderBugun() {
     todayHTML=`<div class="rest-day-card"><div class="rest-day-icon">📋</div><div class="rest-day-title">${T('no_routine')}</div><div class="rest-day-sub">${T('no_routine_sub')}</div></div>`;
   }
   const total=ST.workoutLogs.length; const streak=calcStreak(); const vol=ST.workoutLogs.reduce((a,l)=>a+(l.totalVolume||0),0);
-  el.innerHTML=`<div class="greeting-block"><div class="greeting-name">Hey, ${s.name||'Sporcu'} 👋</div><div class="greeting-sub">${getTodayGreeting()}</div></div><div class="stats-row"><div class="stat-card"><div class="stat-num"><span class="streak-fire">🔥</span>${streak}</div><div class="stat-label">${T('streak')}</div></div><div class="stat-card"><div class="stat-num">${total}</div><div class="stat-label">📅 ${T('sessions')}</div></div><div class="stat-card"><div class="stat-num">${vol>999?Math.round(vol/1000)+'k':vol}</div><div class="stat-label">⚡ kg ${T('volume')}</div></div></div><div style="padding:0 20px 12px"><div class="section-title">${T('today_workout')}</div></div>${todayHTML}`;
+  el.innerHTML=`<div class="greeting-block"><div class="greeting-name">Hey, ${s.name||'Sporcu'} 👋</div><div class="greeting-sub">${getTodayGreeting()}</div></div><div class="stats-row"><div class="stat-card"><div class="stat-num"><span class="streak-fire">🔥</span>${streak}</div><div class="stat-label">${T('streak')}</div></div><div class="stat-card"><div class="stat-num">${total}</div><div class="stat-label">📅 ${T('sessions')}</div></div><div class="stat-card"><div class="stat-num">${vol>999?Math.round(vol/1000)+'k':vol}</div><div class="stat-label">⚡ kg ${T('volume')}</div></div></div><div style="padding:0 20px 12px"><div class="section-title">${T('today_workout')}</div></div>${breakHTML}${todayHTML}`;
 }
 function updateNavLabels(){
   document.querySelectorAll('.nav-item').forEach(n=>{
@@ -1815,20 +1979,8 @@ function calcStreak(){
   return s;
 }
 function skipRestDay(){
-  const routine=ST.routines.find(r=>r.id===ST.settings.activeRoutineId); if(!routine)return;
-  const pos=ST.settings.cyclePosition%routine.days.length;
-  for(let i=1;i<routine.days.length;i++){
-    const d=routine.days[(pos+i)%routine.days.length];
-    if(!d.isRest){
-      // egzersiz yoksa program sekmesine yönlendir
-      if(!d.exercises||d.exercises.length===0){
-        showConfirm('📋',translateDayName(d.name),T('day_empty_sub'),()=>{closeModal('modal-alert');navTo('program');});
-        return;
-      }
-      startWorkout(routine.id,d.id);
-      return;
-    }
-  }
+  const routine=activeRoutine(); if(!routine)return;
+  startTrainingFrom(resolveCyclePos(routine,dayKey()));
 }
 
 // ============================================================
@@ -1906,6 +2058,7 @@ async function removeRoutineDay(routineId,idx) {
 
 async function setActiveRoutine(routineId) {
   ST.settings.activeRoutineId=routineId; ST.settings.cyclePosition=0;
+  ST.settings.cycleDate=dayKey(); ST.settings.breakNotice=null;
   await DB.put('settings',{id:'main',...ST.settings});
   closeModal('modal-routine-builder'); renderProgram(); renderBugun();
 }
@@ -2756,7 +2909,17 @@ async function finishWorkout(){
   try{
     await DB.put('workoutLogs',log); ST.workoutLogs.push(log);
     const routine=ST.routines.find(r=>r.id===w.routineId);
-    if(routine){ST.settings.cyclePosition=(ST.settings.cyclePosition+1)%routine.days.length;ST.settings.lastWorkoutDate=new Date().toISOString();await DB.put('settings',{id:'main',...ST.settings});}
+    ST.settings.lastWorkoutDate=new Date().toISOString();
+    ST.settings.breakNotice=null;
+    if(routine&&routine.days&&routine.days.length&&routine.id===ST.settings.activeRoutineId){
+      // Sirayi calisilan gunun kendisinden ilerlet (dinlenmeyi atlayip antrenman yapildiysa da dogru).
+      const trainedIdx=routine.days.findIndex(d=>d.id===w.dayId);
+      const base=trainedIdx>=0?trainedIdx:normPos(ST.settings.cyclePosition,routine.days.length);
+      ST.settings.cyclePosition=(base+1)%routine.days.length;
+      // Yeni pozisyon YARINDAN itibaren gecerli: bugun zaten calisildi, bugunku dinlenme yanmasin.
+      ST.settings.cycleDate=shiftKey(dayKey(),1);
+    }
+    await DB.put('settings',{id:'main',...ST.settings});
     // Save PRs to dedicated prs store
     for(const se of w.exercises.filter(e=>!e.skipped)){
       const workSets=se.completedSets.filter(s=>!s.isWarmup);
@@ -3848,11 +4011,15 @@ async function setLang(lang) {
 }
 
 function getCycleInfo(){
-  const routine=ST.routines.find(r=>r.id===ST.settings.activeRoutineId);
+  const routine=activeRoutine();
   if(!routine)return T('no_routine');
-  const pos=ST.settings.cyclePosition%routine.days.length;
-  const day=routine.days[pos]; const total=routine.days.length;
-  return`${T('next_label')}: ${day.emoji} ${translateDayName(day.name)} (${pos+1}/${total} ${T('in_cycle')})`;
+  const info=getTodayDayInfo(routine); const total=routine.days.length;
+  if(info.done){
+    const n=routine.days[(info.pos+1)%total];
+    return`${T('tomorrow')}: ${n.isRest?'😴':n.emoji} ${translateDayName(n.name)} (${((info.pos+1)%total)+1}/${total} ${T('in_cycle')})`;
+  }
+  const day=info.day;
+  return`${T('next_label')}: ${day.isRest?'😴':day.emoji} ${translateDayName(day.name)} (${info.pos+1}/${total} ${T('in_cycle')})`;
 }
 
 function editSetting(key){
@@ -3889,7 +4056,7 @@ async function saveSetting(key,val){
   renderAyarlar(); renderBugun();
 }
 
-async function resetCyclePos(){ST.settings.cyclePosition=0;await DB.put('settings',{id:'main',...ST.settings});renderAyarlar();renderBugun();}
+async function resetCyclePos(){ST.settings.cyclePosition=0;ST.settings.cycleDate=dayKey();ST.settings.breakNotice=null;await DB.put('settings',{id:'main',...ST.settings});renderAyarlar();renderBugun();}
 
 function clearData(){showConfirm('⚠️',T('delete_data_title'),T('delete_data_msg'),async()=>{indexedDB.deleteDatabase('KaslogDB2');closeModal('modal-alert');location.reload();});}
 
@@ -4838,20 +5005,20 @@ function calcNutritionGoals(isWorkoutDay) {
 }
 
 function getScheduledDayType() {
-  // Aktif routine'e bakarak bugünün döngü pozisyonuna göre antrenman mı dinlenme mi?
-  const routine = ST.routines.find(r => r.id === ST.settings.activeRoutineId);
-  if (!routine || !routine.days || !routine.days.length) return null;
-  const pos = ST.settings.cyclePosition % routine.days.length;
-  const day = routine.days[pos];
-  if (!day) return null;
+  // Takvimle ilerletilmiş döngü pozisyonuna göre bugün antrenman mı dinlenme mi?
+  const routine = activeRoutine();
+  if (!routine) return null;
+  const info = getTodayDayInfo(routine);
+  if (!info || !info.day) return null;
+  if (info.done) return 'workout';
+  const day = info.day;
   const isRest = day.isRest || !day.exercises || day.exercises.filter(e => !e.disabled).length === 0;
   return isRest ? 'rest' : 'workout';
 }
 
 function isTodayWorkoutDay() {
   // 1. Bugün antrenman logu var mı? (workout tamamlandıysa kesin antrenman günü)
-  const key = todayDateKey();
-  if (ST.workoutLogs.some(l => l.date && l.date.startsWith(key))) return true;
+  if (todaysLogs().length) return true;
   // 2. Döngü programına bak (antrenman tamamlanmadan da doğru hedefleri göster)
   const scheduled = getScheduledDayType();
   if (scheduled !== null) return scheduled === 'workout';
@@ -4897,10 +5064,10 @@ function renderBeslenme() {
 
   // AKILLI KÖPRÜ: Bugünkü antrenman programını analiz et
   let bridgeBanner = '';
-  const _activeRoutine = ST.routines.find(r => r.id === ST.settings.activeRoutineId);
+  const _activeRoutine = activeRoutine();
   if (_activeRoutine) {
-    const _pos = ST.settings.cyclePosition % _activeRoutine.days.length;
-    const _todayDay = _activeRoutine.days[_pos];
+    const _info = getTodayDayInfo(_activeRoutine);
+    const _todayDay = _info && _info.day;
     if (_todayDay && !_todayDay.isRest && _todayDay.exercises && _todayDay.exercises.length > 0) {
       const _groups = [...new Set(_todayDay.exercises.map(de => { const ex = getExercise(de.exId); return ex ? ex.group : ''; }).filter(Boolean))];
       const _hasLegs = _groups.includes('legs');
@@ -7521,7 +7688,7 @@ async function init(){
   });
   document.addEventListener('visibilitychange',()=>{
     if(document.hidden) _registerNutSync();   // arka plana geçti → devri SW'ye ver
-    else _drainBgJobs();                      // geri döndü → biten işleri yaz
+    else { _drainBgJobs(); checkDayRollover(); } // geri döndü → biten işleri yaz + gün değiştiyse döngüyü tazele
   });
   window.addEventListener('pagehide',()=>{ _registerNutSync(); });
   const allPrs=await DB.getAll('prs');
@@ -7532,6 +7699,12 @@ async function init(){
     if(!ST.prs[s.exId]){ST.prs[s.exId]=s;await DB.put('prs',s);}
     await DB.del('settings',s.id);
   }
+  // Takvim ilerlemesini uygula: geçen dinlenme günleri yansın, uzun ara yakalansın.
+  await syncCycle();
+  _lastSeenDay=dayKey();
+  setInterval(checkDayRollover,60000);
+  window.addEventListener('focus',checkDayRollover);
+
   const circle=document.getElementById('rest-circle');
   if(circle){circle.style.strokeDasharray=restC;circle.style.strokeDashoffset=0;}
   if(savedSettings?.name){
