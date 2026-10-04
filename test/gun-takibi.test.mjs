@@ -8,22 +8,9 @@
 // kopyaladığı bir taklit değil. Takvim sahte bir saatle ileri sarılır.
 // ============================================================
 
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { slice } from './_kaynak.mjs';
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const HTML = readFileSync(join(ROOT, 'index.html'), 'utf8');
-
-// ── index.html'den motoru sök ──────────────────────────────
-function slice(startMark, endMark, label) {
-  const a = HTML.indexOf(startMark);
-  if (a < 0) throw new Error(`bulunamadı: ${label} (başlangıç)`);
-  const b = HTML.indexOf(endMark, a);
-  if (b < 0) throw new Error(`bulunamadı: ${label} (bitiş)`);
-  return HTML.slice(a, b);
-}
-
+// ── index.html'den (js/*.js) motoru sök ───────────────────
 const ENGINE = slice('const LONG_BREAK_DAYS', '// BUGÜN', 'döngü motoru');
 // finishWorkout içindeki pozisyon ilerletme bloğu
 const ADVANCE = slice(

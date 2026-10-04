@@ -83,21 +83,111 @@ Kota dolduğunda istemci kullanıcıyı "kendi ücretsiz Gemini key'ini gir"
 akışına yönlendirir; o kullanıcının istekleri doğrudan Google'a gider ve
 ortak kotadan düşmez.
 
+### Tarayıcı tarafı: kaçış + içerik güvenliği politikası
+
+Besin adları Open Food Facts'ten, AI'dan ve içe aktarılan yedekten geliyor;
+hepsi `innerHTML` şablonlarına yazılıyor. Bu yüzden **her kullanıcı/üçüncü taraf
+metni `esc()` ile kaçırılır** (`js/i18n.js`) ve yedek dosyası içeri alınmadan
+`sanitizeBackup()` ile doğrulanır (`js/settings.js`).
+
+`vercel.json` ayrıca bir **CSP** gönderir. Ne yapar, ne yapmaz:
+
+- `connect-src` yalnızca bilinen adreslere izin verir (kendi proxy'n, Google AI,
+  Open Food Facts). Bir XSS açığı bulunsa bile **veriyi başka bir sunucuya
+  fetch ile gönderemez**; `img-src` da görüntü işaretçisiyle sızdırmayı kapatır.
+- `script-src` içinde `'unsafe-inline'` VAR: arayüz yüzlerce `onclick="..."`
+  kullanıyor. Yani CSP, enjekte edilmiş bir script'in çalışmasını **engellemez**;
+  zararını sınırlar. Asıl savunma kaçıştır. (`'unsafe-inline'`i kaldırmak tüm
+  satır içi işleyicilerin olay yöneticisine taşınmasını gerektirir.)
+- Yeni bir dış adres (yeni API, yeni CDN) eklersen **CSP'yi de güncelle**, yoksa
+  canlıda sessizce engellenir. `node test/vercel-basliklar.test.mjs` kodun
+  `fetch` ettiği her adresin CSP'de olduğunu denetler.
+
 ## 3. Testler
 
 Bağımlılık gerekmez, Node 18+ yeterli:
 
 ```bash
-node test/proxy.test.mjs
+node test/proxy.test.mjs              # proxy: origin, hız sınırı, USDA
+node test/gun-takibi.test.mjs         # rutin döngüsü / dinlenme günü takibi
+node test/guvenlik-ve-yedek.test.mjs  # HTML kaçışı, yedek doğrulama, CSV, hedefler
+node test/besin-eslesme.test.mjs      # Open Food Facts seçimi + yemek tablosu
+node test/vercel-basliklar.test.mjs   # CSP / güvenlik başlıkları
 ```
 
-Gemini'ye ve Upstash'e gerçek istek atmaz; ikisi de taklit edilir.
+Gemini'ye ve Upstash'e gerçek istek atmaz; ikisi de taklit edilir. Gün takibi,
+güvenlik ve besin testleri `js/*.js` içindeki gerçek kodu söküp çalıştırır
+(kopya değil); dosya sırası `index.html`'deki `<script src>` sırasından okunur.
 
 ## 4. Yerel geliştirme
 
 ```bash
-python -m http.server 4173
+node tools/yerel-sunucu.mjs        # http://localhost:4173
 ```
 
-Sonra `http://localhost:4173` adresini aç. AI çağrılarını yerelde denemek
-istersen Vercel'de `ALLOW_LOCALHOST=1` ayarla.
+Bu sunucu `vercel.json`'daki başlıkları (CSP dahil) **birebir uygular**:
+tarayıcı konsolunda "Refused to…" görürsen politika gerçekten bir şeyi
+engelliyordur — canlıda da aynısı olurdu. (`python -m http.server` hiçbir
+başlık göndermez, CSP hatası yerelde görünmez.)
+
+AI çağrılarını yerelde denemek istersen Vercel'de `ALLOW_LOCALHOST=1` ayarla.
+`/api/*` uçları yerelde çalışmaz (Vercel fonksiyonu); onlar için `vercel dev`.
+
+## 5. Kod yapısı
+
+`index.html` yalnızca iskelet (arayüz kabukları ve modallar). Stil `css/app.css`,
+kod `js/` altında **klasik betikler** olarak bölünmüş ve `index.html`'deki sırayla
+yüklenir. (ES modülü DEĞİL: arayüz `onclick="fonksiyon()"` ile global işlevleri
+çağırıyor; modüle geçmek her işleyicinin yeniden bağlanmasını gerektirirdi.)
+
+| Dosya | İçerik |
+|---|---|
+| `core.js` | sürüm, Gemini çağrısı, IndexedDB sarmalayıcı |
+| `i18n.js` | Türkçe metinler, `esc()`, gün adı çevirisi |
+| `exercises.js` | egzersiz kütüphanesi, varsayılan rutinler |
+| `state.js`, `cycle.js` | uygulama durumu, onboarding, sekme gezinmesi, gün/döngü motoru |
+| `today-program.js` | Bugün, Program, rutin ve gün düzenleyici |
+| `workout.js` | aktif antrenman, yarım kalan antrenman taslağı, plaka hesabı |
+| `stats.js`, `settings.js` | istatistik, ayarlar, yedek (içe/dışa aktarma), AI analizi |
+| `engine.js` | adaptif ilerleme motoru, grafikler, ısı haritası |
+| `nutrition.js` | beslenme sekmesi, hedefler, beslenme istatistikleri |
+| `nutrition-ai.js` | analiz kuyruğu, besin eşleştirme kademeleri (yerel → OFF → AI/USDA) |
+| `meal-routines.js`, `recipes.js`, `nutrition-list.js` | öğün rutinleri, kendi tarifin, liste/düzenleme arayüzü |
+| `dishes.js` | kanonik yemek tablosu (aşağıda) |
+| `a11y.js` | erişilebilirlik katmanı (aşağıda) |
+| `init.js` | açılış, service worker kaydı |
+
+Yeni dosya eklersen: `index.html`'e `<script src>` + `sw.js` içindeki `STATIC`
+listesine ekle.
+
+## 6. Besin eşleştirme sırası
+
+1. **Kendi rutinin / tarifin** (kendi ölçümün — her zaman önce)
+2. **Kanonik yemek tablosu** (`data/yemekler.json`): "mercimek çorbası", "pilav",
+   "menemen" gibi bileşik yemekler. Birkaç tarifin **medyanından** üretilmiş sabit
+   100 g değeri; `tools/tarif-derle.mjs` ile yenilenir. Gram yazılmadıysa ("1 kase")
+   bir kez sorulur ve hatırlanır. Eşleşme tam olmalı: "mercimek" tek başına ham
+   mercimek sayılır, "tavuklu pilav" tablodaki sade pilava eşleşmez.
+3. **Kayıtlı ürün** (daha önce öğrenilen / barkodla okunan)
+4. **Open Food Facts — yalnızca MARKALI sorgularda** ("Sütaş süzme yoğurt").
+   Markasız ham yiyecekte ("tavuk göğsü", "yumurta") paketli ürünün değeri
+   rastgele bir marka olurdu; üstelik OFF kullanıcı katkılı ve gürültülü
+   (aynı yumurta için 116–143 kcal). Gelen değer kcal ≈ 4P+4K+9Y ile tutarlı
+   değilse reddedilir.
+5. **AI (Gemini) anlar, USDA sayıyı verir**; ikisi de yoksa AI tahmini.
+
+Tabloyu genişletmek için `tools/tarif-kaynaklari.json`'a yemek + tarif URL'leri ekle,
+`node tools/tarif-derle.mjs` çalıştır. Tek tarifle üretilen yemekler arayüzde
+"tek tarif — yaklaşık" diye işaretlenir.
+
+## 7. Erişilebilirlik
+
+`js/a11y.js` işaretlemeyi tek noktadan tamamlar: tıklanan `div`'lere `role="button"`
++ klavye (Enter/Boşluk), simge düğmelerine `aria-label`, anahtarlara `role="switch"`,
+pencerelere `role="dialog"` + odak yönetimi + arka plan `inert` + Escape. Grafiklere
+metin alternatifi `chartLabel()` ile verilir. Metin renkleri WCAG AA (4,5:1)
+kontrastı için ayarlıdır (`css/app.css` başındaki not). Bilinen sınır: beyaz yazılı
+turuncu düğmeler 3,4:1 (marka rengi; büyük/kalın yazıda geçer, küçükte geçmez).
+
+Arayüz **yalnızca Türkçe**dir. (İngilizce seçeneği kaldırıldı: onboarding, Beslenme
+sekmesi ve AI istemleri zaten Türkçeydi.)

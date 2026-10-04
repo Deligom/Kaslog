@@ -1,9 +1,32 @@
 // Kaslog Service Worker
 // ÖNEMLİ: Her yeni sürümde CACHE adını değiştir — eski cache otomatik silinir.
-const CACHE = 'kaslog-v2.6.2';
+const CACHE = 'kaslog-v2.7.0';
 const STATIC = [
   './',
-  './index.html'
+  './index.html',
+  './manifest.json',
+  './icon-192.png',
+  './icon-512.png',
+  './css/app.css',
+  './js/core.js',
+  './js/i18n.js',
+  './js/exercises.js',
+  './js/state.js',
+  './js/cycle.js',
+  './js/today-program.js',
+  './js/workout.js',
+  './js/stats.js',
+  './js/settings.js',
+  './js/engine.js',
+  './js/nutrition.js',
+  './js/nutrition-ai.js',
+  './js/meal-routines.js',
+  './js/recipes.js',
+  './js/nutrition-list.js',
+  './js/dishes.js',
+  './js/a11y.js',
+  './data/yemekler.json',
+  './js/init.js'
 ];
 
 self.addEventListener('install', e => {
@@ -67,7 +90,13 @@ function openDb() {
     // Sürüm VERİLMİYOR: şema yönetimi sayfaya ait. Burada sürüm belirtmek
     // sayfa yükseltme yaparken kilitlenmeye yol açardı.
     const r = indexedDB.open('KaslogDB2');
-    r.onsuccess = () => res(r.result);
+    r.onsuccess = () => {
+      const db = r.result;
+      // Sayfa sürüm yükseltmek ya da "tüm verileri sil" demek isterse bağlantıyı
+      // bırak. Bu bağlantı açık kalırsa silme/yükseltme sonsuza dek bekliyordu.
+      db.onversionchange = () => db.close();
+      res(db);
+    };
     r.onerror = () => rej(r.error);
   });
 }
@@ -86,6 +115,14 @@ function idbReq(req) {
 async function flushNutQueue() {
   let db;
   try { db = await openDb(); } catch { return; }
+  try { await flushJobs(db); } finally { try { db.close(); } catch {} }
+
+  // Sayfa açıksa hemen haber ver — beklemeden işlesin
+  const clients = await self.clients.matchAll({ includeUncontrolled: true });
+  for (const c of clients) c.postMessage({ type: 'nut-queue-flushed' });
+}
+
+async function flushJobs(db) {
   if (!db.objectStoreNames.contains(QUEUE_STORE)) return;
 
   let jobs = [];
@@ -111,10 +148,6 @@ async function flushNutQueue() {
       })).catch(() => {});
     }
   }
-
-  // Sayfa açıksa hemen haber ver — beklemeden işlesin
-  const clients = await self.clients.matchAll({ includeUncontrolled: true });
-  for (const c of clients) c.postMessage({ type: 'nut-queue-flushed' });
 }
 
 self.addEventListener('sync', e => {
